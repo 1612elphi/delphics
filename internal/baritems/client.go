@@ -126,3 +126,13 @@ func (c *Client) send() error {
 	}
 	return err
 }
+
+// ShowLevel flashes a level in the bar's HUD; value is 0 to 1, or negative for no meter.
+// Without a running bar it does nothing.
+func ShowLevel(conn *dbus.Conn, icon string, value float64, text string) error {
+	err := conn.Object(BusName, Path).Call(Iface+".ShowLevel", 0, icon, value, text).Err
+	if dbusErr, ok := err.(dbus.Error); ok && dbusErr.Name == "org.freedesktop.DBus.Error.ServiceUnknown" {
+		return nil
+	}
+	return err
+}

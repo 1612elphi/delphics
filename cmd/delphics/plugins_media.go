@@ -26,10 +26,22 @@ const scrollStep = 0.05
 // brightnessctl or logind, so the level is read from sysfs this often.
 const brightnessPoll = time.Second
 
+// sliderQuiet: after the menu's own slider moved, the HUD stays quiet this long; the slider shows the level.
+const sliderQuiet = 600 * time.Millisecond
+
 func runVolume(session *dbus.Conn, item *baritems.Client, stop <-chan os.Signal) error {
 	var cur audio.State
+	read := false
+	var quietUntil time.Time
 	refresh := func() {
+		prev := cur
 		cur = audio.Read()
+		if read && time.Now().After(quietUntil) {
+			if l, ok := volumeLevel(prev, cur); ok {
+				baritems.ShowLevel(session, l.Icon, l.Value, l.Text)
+			}
+		}
+		read = true
 		p := volumeProps(cur)
 		p["menu"] = volumeMenu(cur)
 		set(item, p)
@@ -52,6 +64,7 @@ func runVolume(session *dbus.Conn, item *baritems.Client, stop <-chan os.Signal)
 		case <-updates:
 			refresh()
 		case c := <-item.Changes:
+			quietUntil = time.Now().Add(sliderQuiet)
 			input := c.Entry == "in"
 			fail(audio.SetVolume(input, c.Value))
 			// dragging the slider of a muted device unmutes it
@@ -84,6 +97,28 @@ func runVolume(session *dbus.Conn, item *baritems.Client, stop <-chan os.Signal)
 			return nil
 		}
 	}
+}
+
+// volumeLevel is what changed between two reads, for the HUD: the output first, then the microphone.
+func volumeLevel(prev, cur audio.State) (baritems.Level, bool) {
+	switch {
+	case !cur.HasOutput:
+		return baritems.Level{}, false
+	case cur.Muted != prev.Muted || abs(cur.Volume-prev.Volume) > 0.005:
+		text := fmt.Sprintf("%.0f%%", cur.Volume*100)
+		if cur.Muted {
+			text = "Muted"
+		}
+		return baritems.Level{Icon: volumeIcon(cur), Value: cur.Volume, Text: text}, true
+	case cur.HasInput && cur.InputMuted != prev.InputMuted:
+		if cur.InputMuted {
+			return baritems.Level{Icon: "microphone-sensitivity-muted-symbolic", Value: -1, Text: "Mic muted"}, true
+		}
+		return baritems.Level{Icon: "audio-input-microphone-symbolic", Value: -1, Text: "Mic on"}, true
+	case cur.HasInput && abs(cur.InputVolume-prev.InputVolume) > 0.005:
+		return baritems.Level{Icon: "audio-input-microphone-symbolic", Value: cur.InputVolume, Text: fmt.Sprintf("%.0f%%", cur.InputVolume*100)}, true
+	}
+	return baritems.Level{}, false
 }
 
 func volumeIcon(s audio.State) string {
@@ -172,6 +207,7 @@ func runBrightness(session *dbus.Conn, item *baritems.Client, stop <-chan os.Sig
 			setLevel(c.Value)
 		case d := <-item.Scrolls:
 			setLevel(min(max(level-d*scrollStep, 0), 1))
+			baritems.ShowLevel(session, "display-brightness-symbolic", level, fmt.Sprintf("%.0f%%", level*100))
 		case <-item.Clicks:
 		case <-item.Activations:
 		case <-stop:
@@ -193,4 +229,61 @@ func abs(f float64) float64 {
 		return -f
 	}
 	return f
+}
+
+// brightnessStep is what the brightness keys change, via "delphics brightness up|down".
+const brightnessStep = 0.1
+
+// brightnessCmd changes the backlight and flashes the new level in the bar's HUD:
+// delphics brightness up|down|PERCENT.
+func brightnessCmd(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: delphics brightness up|down|PERCENT")
+		return 2
+	}
+	bl, err := backlight.Find()
+	if err != nil || bl == nil {
+		fmt.Fprintln(os.Stderr, "no backlight", err)
+		return 1
+	}
+	level, err := bl.Level()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	switch args[0] {
+	case "up":
+		level = stepLevel(level, brightnessStep)
+	case "down":
+		level = stepLevel(level, -brightnessStep)
+	default:
+		pct, err := strconv.ParseFloat(strings.TrimSuffix(args[0], "%"), 64)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "usage: delphics brightness up|down|PERCENT")
+			return 2
+		}
+		level = pct / 100
+	}
+	level = min(max(level, 0.01), 1)
+	if err := bl.Set(level); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if conn, err := dbus.ConnectSessionBus(); err == nil {
+		baritems.ShowLevel(conn, "display-brightness-symbolic", level, fmt.Sprintf("%.0f%%", level*100))
+		conn.Close()
+	}
+	return 0
+}
+
+// stepLevel moves level by step and snaps to the step grid, so repeated presses land on 10 %, 20 %, …
+// and a level between grid points moves to the next one.
+func stepLevel(level, step float64) float64 {
+	n := level / abs(step)
+	if step > 0 {
+		n = float64(int(n+1e-6)) + 1
+	} else {
+		n = float64(int(n-1e-6+0.999999)) - 1
+	}
+	return min(max(n*abs(step), 0), 1)
 }

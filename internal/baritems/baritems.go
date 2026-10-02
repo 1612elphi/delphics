@@ -51,6 +51,26 @@ type Server struct {
 	onChange func([]Item)
 	mu       sync.Mutex
 	items    map[string]*Item
+	onLevel  func(Level)
+}
+
+// Level is a value to flash in the bar's HUD, such as a new volume.
+type Level struct {
+	// Icon is an icon theme name
+	Icon string
+	// Value is 0 to 1, or negative for no meter
+	Value float64
+	// Text is shown beside the meter, e.g. "40%" or "Muted"
+	Text string
+}
+
+const maxLevelText = 40
+
+// OnLevel sets the function that shows ShowLevel calls; it runs on a D-Bus goroutine.
+func (s *Server) OnLevel(f func(Level)) {
+	s.mu.Lock()
+	s.onLevel = f
+	s.mu.Unlock()
 }
 
 // Serve exports the API on conn and takes the bus name; it fails if another bar holds it.
@@ -244,6 +264,26 @@ func (m methods) Set(sender dbus.Sender, id string, props map[string]dbus.Varian
 	return m.s.set(string(sender), id, props)
 }
 
+// ShowLevel flashes a level in the bar's HUD. Anyone may call it; it is not tied to an item.
+func (m methods) ShowLevel(icon string, value float64, text string) *dbus.Error {
+	if !iconName.MatchString(icon) {
+		return invalid("icon must be an icon theme name, not a path")
+	}
+	if utf8.RuneCountInString(text) > maxLevelText {
+		return invalid("text longer than %d characters", maxLevelText)
+	}
+	if value > 1 {
+		value = 1
+	}
+	m.s.mu.Lock()
+	f := m.s.onLevel
+	m.s.mu.Unlock()
+	if f != nil {
+		f(Level{icon, value, text})
+	}
+	return nil
+}
+
 // Remove deletes one of the caller's items; removing an unknown id is not an error.
 func (m methods) Remove(sender dbus.Sender, id string) *dbus.Error {
 	return m.s.remove(string(sender), id)
@@ -253,6 +293,7 @@ const introspection = introspect.IntrospectDeclarationString + `<node>
  <interface name="` + Iface + `">
   <method name="Set"><arg name="id" direction="in" type="s"/><arg name="props" direction="in" type="a{sv}"/></method>
   <method name="Remove"><arg name="id" direction="in" type="s"/></method>
+  <method name="ShowLevel"><arg name="icon" direction="in" type="s"/><arg name="value" direction="in" type="d"/><arg name="text" direction="in" type="s"/></method>
   <signal name="Clicked"><arg name="id" type="s"/><arg name="button" type="u"/></signal>
   <signal name="Activated"><arg name="id" type="s"/><arg name="entry" type="s"/></signal>
   <signal name="Changed"><arg name="id" type="s"/><arg name="entry" type="s"/><arg name="value" type="d"/></signal>

@@ -69,6 +69,9 @@ window.delphics-bar { background: #101f10; color: #ebe4d2; font-family: "Open Sa
 .delphics-bar popover.menu modelbutton:hover arrow, .delphics-bar popover.menu modelbutton:selected arrow { background: #213321; color: #ebe4d2; }
 .delphics-bar popover.menu modelbutton:disabled { color: #959074; }
 .delphics-bar popover.menu modelbutton check { color: #c2ad61; }
+.delphics-bar .hud { color: #ebe4d2; }
+.delphics-bar .hud progressbar trough { background: #213321; border: none; border-radius: 0; min-height: 4px; min-width: 120px; }
+.delphics-bar .hud progressbar progress { background: #c2ad61; border: none; border-radius: 0; min-height: 4px; }
 .delphics-bar popover.menu box.slider { padding: 2px 14px; }
 .delphics-bar popover.menu scale trough { background: #213321; border: none; outline: none; box-shadow: none; border-radius: 0; min-height: 4px; }
 .delphics-bar popover.menu scale highlight { background: #c2ad61; border: none; box-shadow: none; border-radius: 0; }
@@ -132,7 +135,8 @@ func activate(app *gtk.Application) {
 	dndLabel.SetVisible(false)
 	// plugin items, including the built-in network, battery and clock plugins (delphics plugin NAME)
 	itemBox := gtk.NewBox(gtk.OrientationHorizontal, 14)
-	for _, w := range []gtk.Widgetter{appBox, mapArea, noteLabel, dndLabel, itemBox} {
+	levels := newHUD(noteLabel)
+	for _, w := range []gtk.Widgetter{appBox, mapArea, levels.stack, dndLabel, itemBox} {
 		bar.Append(w)
 	}
 	hintBox := gtk.NewBox(gtk.OrientationHorizontal, 14)
@@ -249,7 +253,7 @@ func activate(app *gtk.Application) {
 		log.Printf("session bus: %v", err)
 	} else {
 		setupNotifications(app, conn, noteLabel, dndLabel)
-		setupItems(conn, itemBox)
+		setupItems(conn, itemBox, levels)
 	}
 
 	win.SetVisible(true)
@@ -385,7 +389,7 @@ type itemView struct {
 // setupItems shows plugin items (internal/baritems) in box and reports clicks and menu choices back.
 // A left click opens the item's menu when it has one; every click is also sent as Clicked, so a plugin
 // can refresh what its menu shows.
-func setupItems(conn *dbus.Conn, box *gtk.Box) {
+func setupItems(conn *dbus.Conn, box *gtk.Box, levels *hud) {
 	var srv *baritems.Server
 	views := map[string]*itemView{}
 	newView := func(id string) *itemView {
@@ -467,7 +471,9 @@ func setupItems(conn *dbus.Conn, box *gtk.Box) {
 	srv, err = baritems.Serve(conn, func(items []baritems.Item) { glib.IdleAdd(func() { render(items) }) })
 	if err != nil {
 		log.Printf("bar items: %v", err)
+		return
 	}
+	srv.OnLevel(func(l baritems.Level) { glib.IdleAdd(func() { levels.show(l) }) })
 }
 
 // noteMarkup renders a notification as one line: app, summary, first body line, and how many more are queued.

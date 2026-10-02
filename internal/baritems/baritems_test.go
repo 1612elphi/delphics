@@ -119,6 +119,18 @@ func TestItems(t *testing.T) {
 		t.Error("no click signal")
 	}
 
+	levels := make(chan Level, 1)
+	srv.OnLevel(func(l Level) { levels <- l })
+	if err := ShowLevel(b, "audio-volume-medium-symbolic", 0.4, "40%"); err != nil {
+		t.Fatal(err)
+	}
+	if l := <-levels; l.Icon != "audio-volume-medium-symbolic" || l.Value != 0.4 || l.Text != "40%" {
+		t.Errorf("level %+v", l)
+	}
+	if err := ShowLevel(b, "../x.svg", 0.4, ""); err == nil {
+		t.Error("icon path accepted")
+	}
+
 	// b's items go away with its connection
 	b.Close()
 	if items := next(); len(items) != 1 || items[0].ID != "vpn" {

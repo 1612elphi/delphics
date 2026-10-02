@@ -79,7 +79,7 @@ Hint groups (what the bar shows while the modifiers are held):
 |---|---|---|---|---|
 | 43 | Print / Ctrl+Print / Alt+Print | screenshot region / screen / window | same | keep |
 | 44 | volume, mic mute, media keys | wpctl, playerctl | same | keep |
-| 45 | brightness keys | brightnessctl | same | keep |
+| 45 | brightness keys | `delphics brightness up` / `down` (±10 %, shown in the bar HUD) | brightnessctl | changed |
 | 46 | Ctrl+Alt+Delete | quit niri | same | keep |
 
 ## Removed

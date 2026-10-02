@@ -167,3 +167,32 @@ func TestMoreMenus(t *testing.T) {
 		t.Errorf("modem off menu %+v", w)
 	}
 }
+
+func TestVolumeLevelAndBrightnessSteps(t *testing.T) {
+	base := audio.State{HasOutput: true, Volume: 0.4, HasInput: true, InputVolume: 1}
+	if _, ok := volumeLevel(base, base); ok {
+		t.Error("no change must not flash")
+	}
+	up := base
+	up.Volume = 0.5
+	if l, ok := volumeLevel(base, up); !ok || l.Text != "50%" || l.Value != 0.5 || l.Icon != "audio-volume-medium-symbolic" {
+		t.Errorf("volume up: %+v %v", l, ok)
+	}
+	muted := base
+	muted.Muted = true
+	if l, _ := volumeLevel(base, muted); l.Text != "Muted" || l.Icon != "audio-volume-muted-symbolic" {
+		t.Errorf("mute: %+v", l)
+	}
+	mic := base
+	mic.InputMuted = true
+	if l, _ := volumeLevel(base, mic); l.Text != "Mic muted" || l.Value >= 0 {
+		t.Errorf("mic mute: %+v", l)
+	}
+	for _, tc := range []struct{ from, step, want float64 }{
+		{1, -0.1, 0.9}, {0.9, 0.1, 1}, {0.59, 0.1, 0.6}, {0.59, -0.1, 0.5}, {0.6, -0.1, 0.5}, {0.05, -0.1, 0}, {0.6, 0.1, 0.7},
+	} {
+		if got := stepLevel(tc.from, tc.step); abs(got-tc.want) > 1e-9 {
+			t.Errorf("stepLevel(%v, %v) = %v, want %v", tc.from, tc.step, got, tc.want)
+		}
+	}
+}
