@@ -32,8 +32,6 @@ import (
 // niri layout gap from delphics-desktop/niri/config.kdl
 const niriGap = 8
 
-const minimapWidth = 160
-
 // milliseconds Super must be held before the hint view replaces the bar; shorter taps are shortcuts
 const hintDelay = 350
 
@@ -87,9 +85,8 @@ func activate(app *gtk.Application) {
 	bar.AddCSSClass("bar")
 	appLabel := gtk.NewLabel("")
 	appLabel.AddCSSClass("app")
-	minimap := gtk.NewDrawingArea()
-	minimap.SetContentWidth(minimapWidth)
-	minimap.SetContentHeight(28)
+	mapArea := gtk.NewDrawingArea()
+	mapArea.SetContentHeight(28)
 	noteLabel := gtk.NewLabel("")
 	noteLabel.AddCSSClass("notification")
 	noteLabel.SetHExpand(true)
@@ -103,7 +100,7 @@ func activate(app *gtk.Application) {
 	batLabel.AddCSSClass("status")
 	clock := gtk.NewLabel("")
 	clock.AddCSSClass("clock")
-	for _, w := range []gtk.Widgetter{appLabel, minimap, noteLabel, dndLabel, netLabel, batLabel, clock} {
+	for _, w := range []gtk.Widgetter{appLabel, mapArea, noteLabel, dndLabel, netLabel, batLabel, clock} {
 		bar.Append(w)
 	}
 	hintBox := gtk.NewBox(gtk.OrientationHorizontal, 14)
@@ -126,15 +123,38 @@ func activate(app *gtk.Application) {
 
 	var mu sync.Mutex
 	state := niri.NewState()
-	var view niri.View
 	names := appNames()
+	var layout minimap
 
-	minimap.SetDrawFunc(func(_ *gtk.DrawingArea, cr *cairo.Context, width, height int) {
-		mu.Lock()
-		v := view
-		mu.Unlock()
-		drawMinimap(cr, v, float64(win.Width()), float64(width), float64(height))
+	mapArea.SetDrawFunc(func(_ *gtk.DrawingArea, cr *cairo.Context, _, height int) {
+		layout.draw(cr, height)
 	})
+	// refresh recomputes the view from the niri state; GTK thread only
+	refresh := func() {
+		surface := win.Surface()
+		if surface == nil {
+			return
+		}
+		mon := gdk.DisplayGetDefault().MonitorAtSurface(surface)
+		if mon == nil {
+			return
+		}
+		geo := mon.Geometry()
+		// the bar's exclusive zone is the only strut, so the working area is the monitor minus the bar
+		workH := float64(geo.Height() - win.Height())
+		mu.Lock()
+		view := state.View(niriGap, float64(geo.Width()))
+		mu.Unlock()
+		title := ""
+		if view.Focused != nil {
+			title = displayName(names, view.Focused.AppID)
+		}
+		appLabel.SetText(title)
+		layout = layoutMinimap(view, workH, niriGap)
+		mapArea.SetContentWidth(layout.width)
+		mapArea.QueueDraw()
+	}
+	win.ConnectMap(func() { glib.IdleAdd(refresh) })
 
 	go func() {
 		for {
@@ -143,16 +163,8 @@ func activate(app *gtk.Application) {
 				if err := state.Apply(line); err != nil {
 					log.Printf("niri event: %v", err)
 				}
-				view = state.View(niriGap)
-				title := ""
-				if view.Focused != nil {
-					title = displayName(names, view.Focused.AppID)
-				}
 				mu.Unlock()
-				glib.IdleAdd(func() {
-					appLabel.SetText(title)
-					minimap.QueueDraw()
-				})
+				glib.IdleAdd(refresh)
 			})
 			log.Printf("niri stream: %v; reconnecting", err)
 			time.Sleep(2 * time.Second)
@@ -342,35 +354,6 @@ func noteMarkup(n notify.Notification, more int) string {
 		fmt.Fprintf(&b, " <span foreground=\"#959074\">+%d</span>", more)
 	}
 	return b.String()
-}
-
-// drawMinimap scales the strip so the whole strip and the visible area fit in the widget.
-func drawMinimap(cr *cairo.Context, v niri.View, screenW, width, height float64) {
-	if len(v.Columns) == 0 {
-		return
-	}
-	last := v.Columns[len(v.Columns)-1]
-	stripW := last.X + last.Width
-	left := min(0, v.ViewX)
-	right := max(stripW, v.ViewX+screenW)
-	scale := width / (right - left)
-	const tileH = 12.0
-	y := (height - tileH) / 2
-	for _, c := range v.Columns {
-		x := (c.X - left) * scale
-		w := max(c.Width*scale-1, 2)
-		if c.Focused {
-			setColor(cr, palette.primary)
-		} else {
-			setColor(cr, palette.border)
-		}
-		cr.Rectangle(x, y, w, tileH)
-		cr.Fill()
-	}
-	setColor(cr, palette.muted)
-	cr.SetLineWidth(1)
-	cr.Rectangle((v.ViewX-left)*scale+0.5, y-2.5, screenW*scale-1, tileH+5)
-	cr.Stroke()
 }
 
 // appNames maps desktop file IDs without ".desktop" to their Name.

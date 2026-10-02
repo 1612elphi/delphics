@@ -108,6 +108,7 @@ delphitools-cli and delphitools-lnx: planned, packaging undecided.
 ### Bar
 
 - Data: niri IPC event stream (JSON over `$NIRI_SOCKET`) for windows, columns, focus.
+- Minimap: one tile per window (stacked windows included), the screen as a frame, off-screen tiles dimmed; true-to-screen scale with fixed 3 px gaps, panned past 240 px. niri's IPC has no scroll position for tiled windows (`tile_pos_in_workspace_view` is floating-only in 26.04), so the bar re-runs niri's `compute_new_view_offset` for `center-focused-column "never"` on every focus change. Actions that scroll without moving focus (`center-column`, `center-visible-columns`, touchpad scrolling) put the frame off until the next scroll the emulation sees; changing `center-focused-column` needs a matching change in `internal/niri`.
 - Plugin API: D-Bus, bus name prefix `tools.delphi.Delphics`. Plugins register items and push updates; click callbacks supported.
 - Notifications: the bar owns `org.freedesktop.Notifications` (`internal/notify`). The newest one shows in one line in the middle of the bar, with a `+N` count of the others; clicking runs its `default` action and dismisses it. Default timeout 5 s; critical urgency stays until dismissed. No popups, no history.
 - Do-not-disturb: GApplication action `dnd` (`gapplication action tools.delphi.Delphics.Bar dnd`, Super+Ctrl+N). It hides all but critical notifications, drops the ones on screen, and shows `dnd` on the right.

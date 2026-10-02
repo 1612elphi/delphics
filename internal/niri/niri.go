@@ -34,10 +34,20 @@ type Workspace struct {
 type State struct {
 	Windows    map[uint64]Window
 	Workspaces map[uint64]Workspace
+	// views follows each workspace's scroll position, which niri's IPC does not report for tiled windows
+	views map[uint64]*scroll
+}
+
+// scroll is the emulated view position of one workspace's strip.
+type scroll struct {
+	x float64
+	// window that was focused, and the view position relative to its column
+	window uint64
+	off    float64
 }
 
 func NewState() *State {
-	return &State{Windows: map[uint64]Window{}, Workspaces: map[uint64]Workspace{}}
+	return &State{Windows: map[uint64]Window{}, Workspaces: map[uint64]Workspace{}, views: map[uint64]*scroll{}}
 }
 
 // Apply updates the state from one event line. Lines that are not events (the initial reply) are ignored.
@@ -132,21 +142,31 @@ func (s *State) focus(id *uint64) {
 	}
 }
 
+type Tile struct {
+	Height  float64
+	Focused bool
+}
+
 type Column struct {
 	X, Width float64
 	Focused  bool
+	// Tiles top to bottom
+	Tiles []Tile
 }
 
 // View is the scrolling strip of the focused workspace, in niri's logical pixels.
 type View struct {
 	Focused *Window
 	Columns []Column
-	// ViewX is the left edge of the visible screen area in strip coordinates.
-	ViewX float64
+	// ViewX is the left edge of the visible screen area in strip coordinates, ViewW its width.
+	ViewX, ViewW float64
 }
 
-func (s *State) View(gap float64) View {
-	var v View
+// View lays out the focused workspace's strip. viewW is the output's working area width; the scroll
+// position follows niri's center-focused-column "never": the view moves only as far as needed to show
+// the focused column fully, by the gap on either side.
+func (s *State) View(gap, viewW float64) View {
+	v := View{ViewW: viewW}
 	for _, w := range s.Windows {
 		if w.IsFocused {
 			w := w
@@ -159,23 +179,22 @@ func (s *State) View(gap float64) View {
 			wsID = id
 		}
 	}
-	cols := map[int]*Column{}
-	viewPos := map[int]float64{}
+	type tile struct {
+		row int
+		Tile
+	}
+	cols := map[int][]tile{}
+	widths := map[int]float64{}
+	// column index of every tiled window, to tell whether focus stayed in the same column
+	colOf := map[uint64]int{}
 	for _, w := range s.Windows {
 		p := w.Layout.PosInScrollingLayout
 		if w.IsFloating || p == nil || w.WorkspaceID == nil || *w.WorkspaceID != wsID {
 			continue
 		}
-		c := cols[p[0]]
-		if c == nil {
-			c = &Column{}
-			cols[p[0]] = c
-		}
-		c.Width = max(c.Width, w.Layout.TileSize[0])
-		c.Focused = c.Focused || w.IsFocused
-		if t := w.Layout.TilePosInWorkspaceView; t != nil {
-			viewPos[p[0]] = t[0]
-		}
+		cols[p[0]] = append(cols[p[0]], tile{p[1], Tile{w.Layout.TileSize[1], w.IsFocused}})
+		widths[p[0]] = max(widths[p[0]], w.Layout.TileSize[0])
+		colOf[w.ID] = p[0]
 	}
 	idx := make([]int, 0, len(cols))
 	for i := range cols {
@@ -183,16 +202,65 @@ func (s *State) View(gap float64) View {
 	}
 	sort.Ints(idx)
 	x := 0.0
+	focused := -1
 	for _, i := range idx {
-		c := cols[i]
-		c.X = x
-		x += c.Width + gap
-		if vx, ok := viewPos[i]; ok {
-			v.ViewX = c.X - vx
+		ts := cols[i]
+		sort.Slice(ts, func(a, b int) bool { return ts[a].row < ts[b].row })
+		c := Column{X: x, Width: widths[i]}
+		for _, t := range ts {
+			c.Tiles = append(c.Tiles, t.Tile)
+			c.Focused = c.Focused || t.Focused
 		}
-		v.Columns = append(v.Columns, *c)
+		if c.Focused {
+			focused = len(v.Columns)
+		}
+		x += c.Width + gap
+		v.Columns = append(v.Columns, c)
 	}
+
+	sc := s.views[wsID]
+	if sc == nil {
+		// a new strip starts with its first column one gap from the left edge
+		sc = &scroll{x: -gap}
+		s.views[wsID] = sc
+	}
+	if focused >= 0 && viewW > 0 {
+		c := v.Columns[focused]
+		cur := sc.x
+		// niri keeps the view relative to the active column, so it moves with the column when columns
+		// to its left open, close or resize
+		if prev, ok := colOf[sc.window]; ok && prev == idx[focused] {
+			cur = c.X + sc.off
+		}
+		sc.x = fitView(cur, viewW, c.X, c.Width, gap)
+		sc.window, sc.off = v.Focused.ID, sc.x-c.X
+	}
+	v.ViewX = sc.x
 	return v
+}
+
+// fitView is niri's compute_new_view_offset (src/layout/scrolling.rs, v26.04) in absolute coordinates:
+// the new left edge of the view after focusing the column at colX.
+func fitView(cur, viewW, colX, colW, gap float64) float64 {
+	if viewW <= colW {
+		return colX
+	}
+	pad := min(max((viewW-colW)/2, 0), gap)
+	left, right := colX-pad, colX+colW+pad
+	if cur <= left && right <= cur+viewW {
+		return cur
+	}
+	if abs(cur-left) <= abs(cur+viewW-right) {
+		return left
+	}
+	return right - viewW
+}
+
+func abs(f float64) float64 {
+	if f < 0 {
+		return -f
+	}
+	return f
 }
 
 // Stream sends every event line to onEvent until the connection fails.
