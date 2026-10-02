@@ -430,7 +430,7 @@ func hintMarkup(hs []hints.Hint) string {
 	var b strings.Builder
 	for i, h := range hs {
 		if i > 0 {
-			b.WriteString("   ")
+			b.WriteString("  ")
 		}
 		fmt.Fprintf(&b, "<span foreground=\"#ebe4d2\" weight=\"bold\">%s</span> %s",
 			glib.MarkupEscapeText(strings.Join(h.Keys, "/")), glib.MarkupEscapeText(h.Action))
