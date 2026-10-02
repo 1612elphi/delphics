@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +61,13 @@ window.delphics-bar { background: #101f10; color: #ebe4d2; font-family: "Open Sa
 .delphics-bar .item.bold { color: #ebe4d2; font-weight: 700; }
 .delphics-bar .hints { color: #959074; }
 .delphics-bar .notification.critical { color: #c2ad61; }
+.delphics-bar popover.menu { font-family: "Open Sans"; font-stretch: condensed; font-size: 13px; }
+.delphics-bar popover.menu > contents { background: #101f10; color: #ebe4d2; border: 1px solid #213321; border-radius: 0; box-shadow: none; padding: 4px 0; }
+.delphics-bar popover.menu modelbutton { border-radius: 0; padding: 3px 14px; min-height: 22px; }
+.delphics-bar popover.menu modelbutton:hover, .delphics-bar popover.menu modelbutton:selected { background: #213321; }
+.delphics-bar popover.menu modelbutton:disabled { color: #959074; }
+.delphics-bar popover.menu modelbutton check { color: #c2ad61; }
+.delphics-bar popover.menu separator { background: #213321; margin: 4px 0; }
 `
 
 func rgb(hex int) [3]float64 {
@@ -88,8 +96,12 @@ func activate(app *gtk.Application) {
 
 	bar := gtk.NewBox(gtk.OrientationHorizontal, 14)
 	bar.AddCSSClass("bar")
-	appLabel := gtk.NewLabel("")
+	appLabel := gtk.NewLabel("Desktop")
 	appLabel.AddCSSClass("app")
+	haveWindow := false
+	appClick := gtk.NewGestureClick()
+	appClick.ConnectReleased(func(int, float64, float64) { popupMenu(appLabel, systemMenu(haveWindow), runSystem) })
+	appLabel.AddController(appClick)
 	mapArea := gtk.NewDrawingArea()
 	mapArea.SetContentHeight(28)
 	noteLabel := gtk.NewLabel("")
@@ -148,11 +160,13 @@ func activate(app *gtk.Application) {
 		mu.Lock()
 		view := state.View(niriGap, float64(geo.Width()))
 		mu.Unlock()
-		title := ""
+		// with no window focused the label still names something, so the system menu stays reachable
+		title := "Desktop"
 		if view.Focused != nil {
 			title = displayName(names, view.Focused.AppID)
 		}
 		appLabel.SetText(title)
+		haveWindow = view.Focused != nil
 		layout = layoutMinimap(view, workH, niriGap)
 		mapArea.SetContentWidth(layout.width)
 		mapArea.QueueDraw()
@@ -333,44 +347,85 @@ func setupNotifications(app *gtk.Application, conn *dbus.Conn, noteLabel, dndLab
 	app.AddAction(toggle)
 }
 
-// setupItems shows plugin items (internal/baritems) in box, one label each, and reports clicks back.
+// itemView is the widget of one plugin item; it lives as long as the item, so an open menu survives updates.
+type itemView struct {
+	box   *gtk.Box
+	icon  *gtk.Image
+	label *gtk.Label
+	item  baritems.Item
+	// menu is the open popover, nil when closed
+	menu *gtk.PopoverMenu
+}
+
+// setupItems shows plugin items (internal/baritems) in box and reports clicks and menu choices back.
+// A left click opens the item's menu when it has one; every click is also sent as Clicked, so a plugin
+// can refresh what its menu shows.
 func setupItems(conn *dbus.Conn, box *gtk.Box) {
 	var srv *baritems.Server
+	views := map[string]*itemView{}
+	newView := func(id string) *itemView {
+		v := &itemView{box: gtk.NewBox(gtk.OrientationHorizontal, 4), icon: gtk.NewImage(), label: gtk.NewLabel("")}
+		v.icon.SetPixelSize(16)
+		v.box.Append(v.icon)
+		v.box.Append(v.label)
+		click := gtk.NewGestureClick()
+		click.SetButton(0)
+		click.ConnectReleased(func(int, float64, float64) {
+			button := click.CurrentButton()
+			if button == 1 && len(v.item.Menu) > 0 && v.menu == nil {
+				pop := popupMenu(v.box, pluginMenu(v.item.Menu), func(entry string) { srv.Activate(id, entry) })
+				v.menu = pop
+				pop.ConnectClosed(func() { v.menu = nil })
+			}
+			srv.Click(id, uint32(button))
+		})
+		v.box.AddController(click)
+		return v
+	}
 	render := func(items []baritems.Item) {
-		for child := box.FirstChild(); child != nil; child = box.FirstChild() {
-			box.Remove(child)
-		}
+		seen := map[string]bool{}
+		var prev gtk.Widgetter
 		for _, it := range items {
-			if it.Text == "" && it.Icon == "" {
-				continue
+			seen[it.ID] = true
+			v := views[it.ID]
+			if v == nil {
+				v = newView(it.ID)
+				views[it.ID] = v
+				box.Append(v.box)
+			}
+			menuChanged := v.menu != nil && !reflect.DeepEqual(v.item.Menu, it.Menu)
+			v.item = it
+			for class, on := range map[string]bool{"status": true, "item": true, "urgent": it.Urgent, "bold": it.Bold} {
+				if on {
+					v.box.AddCSSClass(class)
+				} else {
+					v.box.RemoveCSSClass(class)
+				}
 			}
 			// symbolic icons take the item's text color
-			item := gtk.NewBox(gtk.OrientationHorizontal, 4)
-			item.AddCSSClass("status")
-			item.AddCSSClass("item")
-			if it.Urgent {
-				item.AddCSSClass("urgent")
+			v.icon.SetFromIconName(it.Icon)
+			v.icon.SetVisible(it.Icon != "")
+			v.label.SetText(it.Text)
+			v.label.SetVisible(it.Text != "")
+			v.box.SetTooltipText(it.Tooltip)
+			v.box.SetVisible(it.Text != "" || it.Icon != "")
+			if menuChanged {
+				id := it.ID
+				model, group := buildMenu(pluginMenu(it.Menu), func(entry string) { srv.Activate(id, entry) })
+				v.menu.SetMenuModel(model)
+				v.menu.InsertActionGroup("m", group)
 			}
-			if it.Bold {
-				item.AddCSSClass("bold")
+			box.ReorderChildAfter(v.box, prev)
+			prev = v.box
+		}
+		for id, v := range views {
+			if !seen[id] {
+				if v.menu != nil {
+					v.menu.Popdown()
+				}
+				box.Remove(v.box)
+				delete(views, id)
 			}
-			if it.Icon != "" {
-				icon := gtk.NewImageFromIconName(it.Icon)
-				icon.SetPixelSize(16)
-				item.Append(icon)
-			}
-			if it.Text != "" {
-				item.Append(gtk.NewLabel(it.Text))
-			}
-			if it.Tooltip != "" {
-				item.SetTooltipText(it.Tooltip)
-			}
-			click := gtk.NewGestureClick()
-			click.SetButton(0)
-			id := it.ID
-			click.ConnectReleased(func(int, float64, float64) { srv.Click(id, uint32(click.CurrentButton())) })
-			item.AddController(click)
-			box.Append(item)
 		}
 	}
 	var err error

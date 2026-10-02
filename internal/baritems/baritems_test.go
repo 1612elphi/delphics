@@ -92,6 +92,8 @@ func TestItems(t *testing.T) {
 		"wrong type":   set(a, "vpn", props{"order": dbus.MakeVariant("first")}),
 		"empty id":     set(a, "", props{}),
 		"icon path":    set(a, "vpn", props{"icon": dbus.MakeVariant("/etc/passwd")}),
+		"menu bad key": set(a, "vpn", props{"menu": dbus.MakeVariant([]map[string]dbus.Variant{{"lable": dbus.MakeVariant("x")}})}),
+		"menu type":    set(a, "vpn", props{"menu": dbus.MakeVariant("x")}),
 		"long text":    set(a, "vpn", props{"text": dbus.MakeVariant(strings.Repeat("x", maxText+1))}),
 	} {
 		if err == nil {

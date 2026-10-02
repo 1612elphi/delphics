@@ -1,6 +1,7 @@
 package baritems
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -53,6 +54,35 @@ func TestClientSurvivesBarRestarts(t *testing.T) {
 	case b := <-c.Clicks:
 		t.Errorf("got click %d meant for another item", b)
 	case <-time.After(100 * time.Millisecond):
+	}
+
+	// menus round-trip, and activations reach the client
+	menu := []MenuEntry{{Label: "status"}, {ID: "wifi", Label: "Wi-Fi", Checked: true, Section: true}, {ID: "off", Label: "Off", Disabled: true}}
+	if err := c.Set(Props{"menu": menu}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for got := false; !got; {
+		select {
+		case items := <-changes:
+			if len(items) == 1 && len(items[0].Menu) == 3 {
+				if !reflect.DeepEqual(items[0].Menu, menu) {
+					t.Fatalf("menu = %+v, want %+v", items[0].Menu, menu)
+				}
+				got = true
+			}
+		case <-deadline:
+			t.Fatal("menu never arrived")
+		}
+	}
+	srv.Activate("clock", "wifi")
+	select {
+	case e := <-c.Activations:
+		if e != "wifi" {
+			t.Errorf("activation %q, want wifi", e)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no activation")
 	}
 
 	// bar restarts: the client sends its merged properties again

@@ -7,7 +7,8 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-// Props are item properties for Client.Set: text, icon and tooltip (string), order (int32), urgent and bold (bool).
+// Props are item properties for Client.Set: text, icon and tooltip (string), order (int32), urgent and bold
+// (bool), menu ([]MenuEntry).
 type Props map[string]any
 
 // Client keeps one item on the bar for a plugin. It remembers the item's properties and sends them
@@ -21,12 +22,16 @@ type Client struct {
 	warned bool
 	// Clicks receives the button number of every click on the item; clicks are dropped while it is full.
 	Clicks chan uint32
+	// Activations receives the ID of every chosen menu entry, dropped while full like Clicks.
+	Activations chan string
 }
 
 func NewClient(conn *dbus.Conn, id string) (*Client, error) {
-	c := &Client{conn: conn, id: id, props: map[string]dbus.Variant{}, Clicks: make(chan uint32, 4)}
-	if err := conn.AddMatchSignal(dbus.WithMatchInterface(Iface), dbus.WithMatchMember("Clicked"), dbus.WithMatchArg(0, id)); err != nil {
-		return nil, err
+	c := &Client{conn: conn, id: id, props: map[string]dbus.Variant{}, Clicks: make(chan uint32, 4), Activations: make(chan string, 4)}
+	for _, member := range []string{"Clicked", "Activated"} {
+		if err := conn.AddMatchSignal(dbus.WithMatchInterface(Iface), dbus.WithMatchMember(member), dbus.WithMatchArg(0, id)); err != nil {
+			return nil, err
+		}
 	}
 	if err := conn.AddMatchSignal(dbus.WithMatchInterface("org.freedesktop.DBus"), dbus.WithMatchMember("NameOwnerChanged"),
 		dbus.WithMatchArg(0, BusName)); err != nil {
@@ -48,6 +53,13 @@ func NewClient(conn *dbus.Conn, id string) (*Client, error) {
 					default:
 					}
 				}
+			case sig.Name == Iface+".Activated" && len(sig.Body) == 2 && sig.Body[0] == id:
+				if entry, ok := sig.Body[1].(string); ok {
+					select {
+					case c.Activations <- entry:
+					default:
+					}
+				}
 			}
 		}
 	}()
@@ -60,6 +72,9 @@ func (c *Client) Set(p Props) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for k, v := range p {
+		if m, ok := v.([]MenuEntry); ok {
+			v = Menu(m)
+		}
 		c.props[k] = dbus.MakeVariant(v)
 	}
 	return c.send()

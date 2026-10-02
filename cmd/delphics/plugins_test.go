@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,5 +79,35 @@ func TestNetworkAndClockProps(t *testing.T) {
 	c := clockProps(time.Date(2026, 10, 3, 9, 5, 0, 0, time.UTC))
 	if c["text"] != "09:05" || c["tooltip"] != "Saturday, 3 October 2026" || c["bold"] != true {
 		t.Errorf("clock: %v", c)
+	}
+}
+
+func TestMenus(t *testing.T) {
+	n := sysstat.Network{Kind: sysstat.Wireless, Name: "Home", Strength: 70, HasWifi: true, WifiEnabled: true,
+		AccessPoints: []sysstat.AccessPoint{{SSID: "Home", Strength: 70, Active: true}, {SSID: "Cafe", Strength: 40, Secure: true}}}
+	m := networkMenu(n)
+	labels := []string{}
+	for _, e := range m {
+		labels = append(labels, e.ID+"="+e.Label)
+	}
+	want := "=Connected to Home|wifi=Wi-Fi|ap:Home=Home  70%|ap:Cafe=Cafe  40%|disconnect=Disconnect|settings=Network settings…"
+	if got := strings.Join(labels, "|"); got != want {
+		t.Errorf("network menu\n got %s\nwant %s", got, want)
+	}
+	if !m[1].Checked || !m[2].Checked || m[3].Checked || !m[1].Section || !m[5].Section {
+		t.Errorf("checks/sections wrong: %+v", m)
+	}
+	// Wi-Fi off: no network list, no disconnect
+	n.WifiEnabled, n.Kind = false, sysstat.Offline
+	if m := networkMenu(n); len(m) != 3 || m[1].Checked {
+		t.Errorf("wifi off menu: %+v", m)
+	}
+
+	b := batteryMenu(sysstat.Battery{Present: true, Percent: 64, Seconds: 7800}, "balanced", []string{"power-saver", "balanced", "performance"})
+	if b[0].Label != "64%, 2 h 10 min left" || b[2].Label != "Balanced" || !b[2].Checked || b[1].Checked || !b[1].Section {
+		t.Errorf("battery menu: %+v", b)
+	}
+	if b := batteryMenu(sysstat.Battery{Present: true, Percent: 97, Charging: true, Seconds: 958}, "", nil); b[0].Label != "97%, full in 16 min" {
+		t.Errorf("charging status: %q", b[0].Label)
 	}
 }

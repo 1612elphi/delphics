@@ -40,7 +40,9 @@ type Item struct {
 	Order int32
 	// Urgent is amber bold, Bold is bright bold text
 	Urgent, Bold bool
-	owner        string
+	// Menu is shown on click when not empty
+	Menu  []MenuEntry
+	owner string
 }
 
 // Server holds the items. onChange gets the full sorted item list after every change, on a D-Bus goroutine.
@@ -89,6 +91,11 @@ func Serve(conn *dbus.Conn, onChange func([]Item)) (*Server, error) {
 // Click tells the item's plugin that the user clicked it; button is the GDK button number.
 func (s *Server) Click(id string, button uint32) {
 	s.conn.Emit(Path, Iface+".Clicked", id, button)
+}
+
+// Activate tells the item's plugin that the user chose a menu entry.
+func (s *Server) Activate(id, entry string) {
+	s.conn.Emit(Path, Iface+".Activated", id, entry)
 }
 
 func (s *Server) dropOwner(owner string) {
@@ -168,8 +175,14 @@ func (s *Server) set(owner, id string, props map[string]dbus.Variant) *dbus.Erro
 			it.Urgent, ok = v.Value().(bool)
 		case "bold":
 			it.Bold, ok = v.Value().(bool)
+		case "menu":
+			var err *dbus.Error
+			if it.Menu, err = parseMenu(v); err != nil {
+				return err
+			}
+			ok = true
 		default:
-			return invalid("unknown property %q; known: text, icon, tooltip, order, urgent, bold", k)
+			return invalid("unknown property %q; known: text, icon, tooltip, order, urgent, bold, menu", k)
 		}
 		if !ok {
 			return invalid("property %q has type %s", k, v.Signature())
@@ -213,7 +226,8 @@ func invalid(format string, args ...any) *dbus.Error {
 // methods keeps the exported method set to the API's names only.
 type methods struct{ s *Server }
 
-// Set creates or updates an item. props may hold text (s), icon (s), tooltip (s), order (i), urgent (b) and bold (b);
+// Set creates or updates an item. props may hold text (s), icon (s), tooltip (s), order (i), urgent (b),
+// bold (b) and menu (aa{sv}, see MenuEntry);
 // properties left out keep their current value.
 func (m methods) Set(sender dbus.Sender, id string, props map[string]dbus.Variant) *dbus.Error {
 	return m.s.set(string(sender), id, props)
@@ -229,4 +243,5 @@ const introspection = introspect.IntrospectDeclarationString + `<node>
   <method name="Set"><arg name="id" direction="in" type="s"/><arg name="props" direction="in" type="a{sv}"/></method>
   <method name="Remove"><arg name="id" direction="in" type="s"/></method>
   <signal name="Clicked"><arg name="id" type="s"/><arg name="button" type="u"/></signal>
+  <signal name="Activated"><arg name="id" type="s"/><arg name="entry" type="s"/></signal>
  </interface>` + introspect.IntrospectDataString + `</node>`
