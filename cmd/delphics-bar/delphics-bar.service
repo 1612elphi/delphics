@@ -1,0 +1,12 @@
+[Unit]
+Description=DELPHICS top bar
+PartOf=graphical-session.target
+After=graphical-session.target
+Requisite=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/delphics-bar
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target

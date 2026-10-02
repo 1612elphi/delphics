@@ -1,0 +1,42 @@
+# installed to /usr/share/delphics/starship.toml; used when ~/.config/starship.toml does not exist
+"$schema" = 'https://starship.rs/config-schema.json'
+
+# styles use ANSI names and the default foreground, so the terminal palette applies in light and dark
+format = '''[┌───](bold)$username[@](yellow)$hostname[ : ](bold)$directory$git_branch$git_status
+[└](bold)$character'''
+right_format = '$time'
+add_newline = true
+
+[character]
+success_symbol = '[\$->> ](bold green)'
+error_symbol = '[X->> ](bold red)'
+
+[username]
+show_always = true
+style_user = 'bold'
+style_root = 'bold red'
+format = ': [$user]($style)'
+
+[hostname]
+ssh_only = false
+style = 'bold'
+format = '[$hostname]($style)'
+
+[directory]
+style = 'bold cyan'
+truncation_length = 4
+
+[git_branch]
+format = ' [$branch]($style)'
+style = 'green'
+
+[git_status]
+style = 'red'
+
+[time]
+disabled = false
+format = '[\[ $time \]](cyan) '
+time_format = '%R'
+
+[package]
+disabled = true

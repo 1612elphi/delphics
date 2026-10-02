@@ -92,6 +92,7 @@ delphitools-cli and delphitools-lnx: planned, packaging undecided.
 | niri | github.com/niri-wm/niri tag | rustc >= 1.87 via Debian `rustup`; ~6.5 min on the X280; 6.2 MB stripped |
 | xwayland-satellite | github.com/Supreeeme/xwayland-satellite tag | `-F systemd` |
 | rofi | sid source package, rebuilt | version `<sid>~delphics13+1` |
+| delphics-bar, delphics-modd | this repo (`packages/delphics/build.sh`) | gotk4 pinned to v0.3.1: v0.4.x calls GLib > 2.84 (trixie); first gotk4 compile ~13 min on the X280 |
 
 `bootstrap.sh` (phase 1) installs from a local dir of these .debs plus trixie, trixie-backports, and upstream repos (WezTerm, Tailscale, gh, NodeSource 24), then Helium, fonts, DELPHICS files, Flathub apps, greetd, and moves ifupdown Wi-Fi to NetworkManager.
 
@@ -108,11 +109,12 @@ delphitools-cli and delphitools-lnx: planned, packaging undecided.
 
 - Data: niri IPC event stream (JSON over `$NIRI_SOCKET`) for windows, columns, focus.
 - Plugin API: D-Bus, bus name prefix `tools.delphi.Delphics`. Plugins register items and push updates; click callbacks supported.
-- GTK bindings: `github.com/diamondburned/gotk4`. `gotk4-layer-shell` is GTK3-only and unmaintained since 2024-01, so the bar carries a small cgo binding to `libgtk4-layer-shell` (trixie 1.0.4).
+- GTK bindings: `github.com/diamondburned/gotk4` v0.3.1 (newer versions need a newer GLib than trixie's 2.84). `gotk4-layer-shell` is GTK3-only and unmaintained since 2024-01, so the bar carries a small cgo binding to `libgtk4-layer-shell` (trixie 1.0.4).
 
 ### Key hints
 
-- Holding super past a delay replaces the bar contents with key hints; releasing restores the bar.
+- Holding super past 350 ms replaces the bar contents with key hints; releasing restores the bar.
+- Transport: `delphics-modd` (system service, DynamicUser in group `input`) sends a 1-byte modifier mask on `/run/delphics-modd/modd.sock`.
 - Hint set = held modifier combination + focused app-id.
   - `Super`: window/strip binds
   - `Super+Shift`: move/resize binds

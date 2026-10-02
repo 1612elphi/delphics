@@ -3,6 +3,8 @@
 # Debian ships bat and fd as batcat and fdfind
 fish_add_path -g /usr/lib/delphics/bin
 set -gx EDITOR fresh
+set -g fish_greeting
+test -e ~/.config/starship.toml; or set -gx STARSHIP_CONFIG /usr/share/delphics/starship.toml
 
 status is-interactive; or return
 

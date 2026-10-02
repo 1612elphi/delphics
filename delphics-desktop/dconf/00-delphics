@@ -1,0 +1,7 @@
+# installed to /etc/dconf/db/local.d/; system defaults, each user's own dconf settings override them
+[org/gnome/desktop/interface]
+color-scheme='prefer-dark'
+accent-color='yellow'
+font-name='Open Sans Condensed 11'
+document-font-name='Open Sans Condensed 11'
+monospace-font-name='Iosevka 11'

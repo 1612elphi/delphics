@@ -1,0 +1,21 @@
+[Unit]
+Description=DELPHICS modifier key state
+
+[Service]
+ExecStart=/usr/bin/delphics-modd
+Restart=on-failure
+DynamicUser=yes
+SupplementaryGroups=input
+RuntimeDirectory=delphics-modd
+RuntimeDirectoryMode=0755
+DevicePolicy=closed
+DeviceAllow=char-input r
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

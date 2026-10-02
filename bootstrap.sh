@@ -45,11 +45,11 @@ apt-get update
 log "packages"
 apt-get install -y \
     greetd tuigreet gtklock swayidle swaybg swappy cliphist wl-clipboard \
-    brightnessctl playerctl pipewire-audio wireplumber \
+    brightnessctl playerctl pipewire-audio wireplumber upower \
     xdg-desktop-portal-gnome xdg-desktop-portal-gtk gnome-keyring \
     xwayland libgl1-mesa-dri libegl-mesa0 mesa-vulkan-drivers intel-media-va-driver \
     network-manager power-profiles-daemon \
-    fonts-open-sans fonts-noto-color-emoji orca \
+    fonts-noto-color-emoji orca dconf-cli \
     nautilus flatpak wezterm-nightly tailscale gh nodejs \
     wine wine64 wine32:i386 \
     fish starship \
@@ -81,17 +81,27 @@ fc-cache -f >/dev/null
 
 log "delphics files"
 install -Dm644 "$HERE/delphics-desktop/niri/config.kdl" /usr/share/delphics/niri/config.kdl
+install -Dm644 "$HERE/delphics-desktop/wezterm/wezterm.lua" /usr/share/delphics/wezterm/wezterm.lua
+install -Dm644 "$HERE/delphics-desktop/starship/starship.toml" /usr/share/delphics/starship.toml
 install -Dm644 "$HERE/delphics-cli/fish/delphics.fish" /usr/share/fish/vendor_conf.d/delphics.fish
 mkdir -p /usr/lib/delphics/bin
 ln -sf /usr/bin/batcat /usr/lib/delphics/bin/bat
 ln -sf /usr/bin/fdfind /usr/lib/delphics/bin/fd
 
-USER_NIRI="$USER_HOME/.config/niri/config.kdl"
-if [ ! -e "$USER_NIRI" ]; then
-    install -d -o "$USER_NAME" -g "$USER_NAME" "$USER_HOME/.config" "$USER_HOME/.config/niri"
-    echo 'include "/usr/share/delphics/niri/config.kdl"' > "$USER_NIRI"
-    chown "$USER_NAME:" "$USER_NIRI"
-fi
+install -Dm644 "$HERE/delphics-desktop/dconf/00-delphics" /etc/dconf/db/local.d/00-delphics
+mkdir -p /etc/dconf/profile
+printf 'user-db:user\nsystem-db:local\n' > /etc/dconf/profile/user
+dconf update
+
+# user files that only point at the system defaults; an existing file is left alone
+user_stub() { # path content
+    [ -e "$1" ] && return 0
+    install -d -o "$USER_NAME" -g "$USER_NAME" "$(dirname "$1")"
+    printf '%s\n' "$2" > "$1"
+    chown "$USER_NAME:" "$1"
+}
+user_stub "$USER_HOME/.config/niri/config.kdl" 'include "/usr/share/delphics/niri/config.kdl"'
+user_stub "$USER_HOME/.config/wezterm/wezterm.lua" 'return dofile("/usr/share/delphics/wezterm/wezterm.lua")'
 install -d -o "$USER_NAME" -g "$USER_NAME" "$USER_HOME/Pictures" "$USER_HOME/Pictures/Screenshots"
 chsh -s /usr/bin/fish "$USER_NAME"
 
