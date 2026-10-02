@@ -117,6 +117,7 @@ binds {
     Mod+Ctrl+E { quit; }
     Mod+Ctrl+P { power-off-monitors; }
     Mod+Ctrl+T { spawn "darkman" "toggle"; }
+    Mod+Ctrl+N hotkey-overlay-title="do not disturb" { spawn "gapplication" "action" "tools.delphi.Delphics.Bar" "dnd"; }
 
     // Super+Alt: monitors
     Mod+Alt+Left  { focus-monitor-left; }

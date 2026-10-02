@@ -44,7 +44,7 @@ install -Dm644 "$REPO/cmd/delphics-bar/delphics-bar.service" "$BAR/usr/lib/syste
 mkdir -p "$BAR/DEBIAN"
 printf '#!/bin/sh\nset -e\nsystemctl --global enable delphics-bar.service\n' > "$BAR/DEBIAN/postinst"
 printf '#!/bin/sh\nset -e\n[ "$1" = remove ] && systemctl --global disable delphics-bar.service || true\n' > "$BAR/DEBIAN/prerm"
-package delphics-bar "$(shlibs delphics-bar), upower, network-manager, niri" "$BAR"
+package delphics-bar "$(shlibs delphics-bar), upower, network-manager, niri, libglib2.0-bin" "$BAR"
 
 MODD="$WORK/pkg-modd"
 install -Dm755 "$WORK/delphics-modd" "$MODD/usr/bin/delphics-modd"

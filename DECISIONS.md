@@ -109,6 +109,8 @@ delphitools-cli and delphitools-lnx: planned, packaging undecided.
 
 - Data: niri IPC event stream (JSON over `$NIRI_SOCKET`) for windows, columns, focus.
 - Plugin API: D-Bus, bus name prefix `tools.delphi.Delphics`. Plugins register items and push updates; click callbacks supported.
+- Notifications: the bar owns `org.freedesktop.Notifications` (`internal/notify`). The newest one shows in one line in the middle of the bar, with a `+N` count of the others; clicking runs its `default` action and dismisses it. Default timeout 5 s; critical urgency stays until dismissed. No popups, no history.
+- Do-not-disturb: GApplication action `dnd` (`gapplication action tools.delphi.Delphics.Bar dnd`, Super+Ctrl+N). It hides all but critical notifications, drops the ones on screen, and shows `dnd` on the right.
 - GTK bindings: `github.com/diamondburned/gotk4` v0.3.1 (newer versions need a newer GLib than trixie's 2.84). `gotk4-layer-shell` is GTK3-only and unmaintained since 2024-01, so the bar carries a small cgo binding to `libgtk4-layer-shell` (trixie 1.0.4).
 
 ### Key hints
@@ -139,6 +141,5 @@ delphitools-cli and delphitools-lnx: planned, packaging undecided.
 - `/usr/lib/delphics/bin` is on PATH for fish only; bash scripts calling `bat`/`fd` need `/etc/profile.d` too.
 - Zed Flatpak: host LSP/terminal access setup (`flatpak-spawn --host`), unverified.
 - Affinity under Wine: untested.
-- starship prompt frame uses `bold white`, which is invisible on the light background; switch to the default foreground.
 - Apt repo URL layout under `delphics.delphi.tools`.
 - delphitools-cli / delphitools-lnx packaging.

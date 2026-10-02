@@ -1,4 +1,5 @@
-// delphics-bar is the DELPHICS top bar: focused app and strip minimap on the left, system status on the right.
+// delphics-bar is the DELPHICS top bar: focused app and strip minimap on the left, notifications in the
+// middle, system status on the right. It is also the session's notification daemon.
 package main
 
 import (
@@ -19,10 +20,12 @@ import (
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 	"github.com/diamondburned/gotk4/pkg/pango"
+	"github.com/godbus/dbus/v5"
 
 	"delphics.delphi.tools/internal/hints"
 	"delphics.delphi.tools/internal/layershell"
 	"delphics.delphi.tools/internal/niri"
+	"delphics.delphi.tools/internal/notify"
 	"delphics.delphi.tools/internal/sysstat"
 )
 
@@ -53,6 +56,7 @@ window.delphics-bar { background: #101f10; color: #ebe4d2; font-family: "Open Sa
 .delphics-bar .clock { font-weight: 700; }
 .delphics-bar .mods { color: #c2ad61; font-weight: 700; }
 .delphics-bar .hints { color: #959074; }
+.delphics-bar .notification.critical { color: #c2ad61; }
 `
 
 func rgb(hex int) [3]float64 {
@@ -86,15 +90,20 @@ func activate(app *gtk.Application) {
 	minimap := gtk.NewDrawingArea()
 	minimap.SetContentWidth(minimapWidth)
 	minimap.SetContentHeight(28)
-	spacer := gtk.NewBox(gtk.OrientationHorizontal, 0)
-	spacer.SetHExpand(true)
+	noteLabel := gtk.NewLabel("")
+	noteLabel.AddCSSClass("notification")
+	noteLabel.SetHExpand(true)
+	noteLabel.SetEllipsize(pango.EllipsizeEnd)
+	dndLabel := gtk.NewLabel("dnd")
+	dndLabel.AddCSSClass("status")
+	dndLabel.SetVisible(false)
 	netLabel := gtk.NewLabel("")
 	netLabel.AddCSSClass("status")
 	batLabel := gtk.NewLabel("")
 	batLabel.AddCSSClass("status")
 	clock := gtk.NewLabel("")
 	clock.AddCSSClass("clock")
-	for _, w := range []gtk.Widgetter{appLabel, minimap, spacer, netLabel, batLabel, clock} {
+	for _, w := range []gtk.Widgetter{appLabel, minimap, noteLabel, dndLabel, netLabel, batLabel, clock} {
 		bar.Append(w)
 	}
 	hintBox := gtk.NewBox(gtk.OrientationHorizontal, 14)
@@ -201,7 +210,138 @@ func activate(app *gtk.Application) {
 	// ponytail: polls every 5 s; switch to PropertiesChanged signals if the latency matters
 	glib.TimeoutSecondsAdd(5, tick)
 
+	setupNotifications(app, noteLabel, dndLabel)
+
 	win.SetVisible(true)
+}
+
+// shownNote is a notification on screen; seq tells an expiry timer whether its notification was replaced since.
+type shownNote struct {
+	notify.Notification
+	seq int
+}
+
+// setupNotifications makes the bar the notification daemon. The newest notification shows in noteLabel;
+// clicking it runs its default action and dismisses it. The app action "dnd" toggles do-not-disturb,
+// which hides everything but critical notifications.
+func setupNotifications(app *gtk.Application, noteLabel, dndLabel *gtk.Label) {
+	conn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		log.Printf("session bus: %v", err)
+		return
+	}
+	// GTK thread only from here on
+	var shown []shownNote
+	seq := 0
+	dnd := false
+	var srv *notify.Server
+
+	render := func() {
+		noteLabel.RemoveCSSClass("critical")
+		if len(shown) == 0 {
+			noteLabel.SetText("")
+			return
+		}
+		n := shown[len(shown)-1]
+		if n.Urgency == notify.Critical {
+			noteLabel.AddCSSClass("critical")
+		}
+		noteLabel.SetMarkup(noteMarkup(n.Notification, len(shown)-1))
+	}
+	remove := func(id uint32) bool {
+		for i, n := range shown {
+			if n.ID == id {
+				shown = append(shown[:i], shown[i+1:]...)
+				render()
+				return true
+			}
+		}
+		return false
+	}
+	add := func(n notify.Notification) {
+		if dnd && n.Urgency != notify.Critical {
+			return
+		}
+		seq++
+		s := shownNote{n, seq}
+		replaced := false
+		for i := range shown {
+			if shown[i].ID == n.ID {
+				shown[i], replaced = s, true
+			}
+		}
+		if !replaced {
+			shown = append(shown, s)
+		}
+		render()
+		if n.Timeout > 0 {
+			glib.TimeoutAdd(uint(n.Timeout.Milliseconds()), func() bool {
+				for _, cur := range shown {
+					if cur.ID == s.ID && cur.seq == s.seq {
+						remove(s.ID)
+						srv.Close(s.ID, notify.Expired)
+					}
+				}
+				return false
+			})
+		}
+	}
+
+	srv, err = notify.Serve(conn,
+		func(n notify.Notification) { glib.IdleAdd(func() { add(n) }) },
+		func(id uint32) { glib.IdleAdd(func() { remove(id) }) })
+	if err != nil {
+		log.Printf("notifications: %v", err)
+		return
+	}
+
+	click := gtk.NewGestureClick()
+	click.ConnectReleased(func(int, float64, float64) {
+		if len(shown) == 0 {
+			return
+		}
+		n := shown[len(shown)-1]
+		if n.HasAction("default") {
+			srv.Invoke(n.ID, "default")
+		}
+		remove(n.ID)
+		srv.Close(n.ID, notify.Dismissed)
+	})
+	noteLabel.AddController(click)
+
+	toggle := gio.NewSimpleAction("dnd", nil)
+	toggle.ConnectActivate(func(*glib.Variant) {
+		dnd = !dnd
+		dndLabel.SetVisible(dnd)
+		if !dnd {
+			return
+		}
+		kept := shown[:0]
+		for _, n := range shown {
+			if n.Urgency == notify.Critical {
+				kept = append(kept, n)
+			} else {
+				srv.Close(n.ID, notify.Dismissed)
+			}
+		}
+		shown = kept
+		render()
+	})
+	app.AddAction(toggle)
+}
+
+// noteMarkup renders a notification as one line: app, summary, first body line, and how many more are queued.
+func noteMarkup(n notify.Notification, more int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "<span foreground=\"#c2ad61\" weight=\"bold\">%s</span> %s",
+		glib.MarkupEscapeText(n.AppName), glib.MarkupEscapeText(n.Summary))
+	if body, _, _ := strings.Cut(n.Body, "\n"); body != "" {
+		fmt.Fprintf(&b, " <span foreground=\"#959074\">%s</span>", glib.MarkupEscapeText(body))
+	}
+	if more > 0 {
+		fmt.Fprintf(&b, " <span foreground=\"#959074\">+%d</span>", more)
+	}
+	return b.String()
 }
 
 // drawMinimap scales the strip so the whole strip and the visible area fit in the widget.
