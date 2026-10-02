@@ -68,7 +68,9 @@ func buildMenu(entries []menuEntry, activate func(id string)) (*gio.Menu, *gio.S
 	return build(entries), group
 }
 
-// popupMenu shows entries below parent and removes the popover again when it closes.
+// popupMenu shows entries below parent and removes the popover again when it closes. parent must
+// have a layout manager (a Box, not a Label): only then does GTK resize the popover once the menu's
+// final size is known; otherwise it stays at its first, too small size and scrolls.
 func popupMenu(parent gtk.Widgetter, entries []menuEntry, activate func(id string)) *gtk.PopoverMenu {
 	model, group := buildMenu(entries, activate)
 	pop := gtk.NewPopoverMenuFromModel(model)

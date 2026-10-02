@@ -64,10 +64,12 @@ window.delphics-bar { background: #101f10; color: #ebe4d2; font-family: "Open Sa
 .delphics-bar popover.menu { font-family: "Open Sans"; font-stretch: condensed; font-size: 13px; }
 .delphics-bar popover.menu > contents { background: #101f10; color: #ebe4d2; border: 1px solid #213321; border-radius: 0; box-shadow: none; padding: 4px 0; }
 .delphics-bar popover.menu modelbutton { border-radius: 0; padding: 3px 14px; min-height: 22px; }
-.delphics-bar popover.menu modelbutton:hover, .delphics-bar popover.menu modelbutton:selected { background: #213321; }
+.delphics-bar popover.menu modelbutton:hover, .delphics-bar popover.menu modelbutton:selected,
+.delphics-bar popover.menu modelbutton:hover label, .delphics-bar popover.menu modelbutton:selected label,
+.delphics-bar popover.menu modelbutton:hover arrow, .delphics-bar popover.menu modelbutton:selected arrow { background: #213321; color: #ebe4d2; }
 .delphics-bar popover.menu modelbutton:disabled { color: #959074; }
 .delphics-bar popover.menu modelbutton check { color: #c2ad61; }
-.delphics-bar popover.menu separator { background: #213321; margin: 4px 0; }
+.delphics-bar popover.menu separator { background: #213321; }
 `
 
 func rgb(hex int) [3]float64 {
@@ -99,9 +101,12 @@ func activate(app *gtk.Application) {
 	appLabel := gtk.NewLabel("Desktop")
 	appLabel.AddCSSClass("app")
 	haveWindow := false
+	// the system menu hangs off a box around the label; see popupMenu
+	appBox := gtk.NewBox(gtk.OrientationHorizontal, 0)
+	appBox.Append(appLabel)
 	appClick := gtk.NewGestureClick()
-	appClick.ConnectReleased(func(int, float64, float64) { popupMenu(appLabel, systemMenu(haveWindow), runSystem) })
-	appLabel.AddController(appClick)
+	appClick.ConnectReleased(func(int, float64, float64) { popupMenu(appBox, systemMenu(haveWindow), runSystem) })
+	appBox.AddController(appClick)
 	mapArea := gtk.NewDrawingArea()
 	mapArea.SetContentHeight(28)
 	noteLabel := gtk.NewLabel("")
@@ -113,7 +118,7 @@ func activate(app *gtk.Application) {
 	dndLabel.SetVisible(false)
 	// plugin items, including the built-in network, battery and clock plugins (delphics plugin NAME)
 	itemBox := gtk.NewBox(gtk.OrientationHorizontal, 14)
-	for _, w := range []gtk.Widgetter{appLabel, mapArea, noteLabel, dndLabel, itemBox} {
+	for _, w := range []gtk.Widgetter{appBox, mapArea, noteLabel, dndLabel, itemBox} {
 		bar.Append(w)
 	}
 	hintBox := gtk.NewBox(gtk.OrientationHorizontal, 14)
