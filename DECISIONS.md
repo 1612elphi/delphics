@@ -92,7 +92,7 @@ delphitools-cli and delphitools-lnx: planned, packaging undecided.
 | niri | github.com/niri-wm/niri tag | rustc >= 1.87 via Debian `rustup`; ~6.5 min on the X280; 6.2 MB stripped |
 | xwayland-satellite | github.com/Supreeeme/xwayland-satellite tag | `-F systemd` |
 | rofi | sid source package, rebuilt | version `<sid>~delphics13+1` |
-| delphics-bar, delphics-modd | this repo (`packages/delphics/build.sh`) | gotk4 pinned to v0.3.1: v0.4.x calls GLib > 2.84 (trixie); first gotk4 compile ~13 min on the X280 |
+| delphics-bar, delphics-modd, delphics | this repo (`packages/delphics/build.sh`) | gotk4 pinned to v0.3.1: v0.4.x calls GLib > 2.84 (trixie); first gotk4 compile ~13 min on the X280 |
 
 `bootstrap.sh` (phase 1) installs from a local dir of these .debs plus trixie, trixie-backports, and upstream repos (WezTerm, Tailscale, gh, NodeSource 24), then Helium, fonts, DELPHICS files, Flathub apps, greetd, and moves ifupdown Wi-Fi to NetworkManager.
 
@@ -109,7 +109,12 @@ delphitools-cli and delphitools-lnx: planned, packaging undecided.
 
 - Data: niri IPC event stream (JSON over `$NIRI_SOCKET`) for windows, columns, focus.
 - Minimap: one tile per window (stacked windows included), the screen as a frame, off-screen tiles dimmed; true-to-screen scale with fixed 3 px gaps, panned past 240 px. niri's IPC has no scroll position for tiled windows (`tile_pos_in_workspace_view` is floating-only in 26.04), so the bar re-runs niri's `compute_new_view_offset` for `center-focused-column "never"` on every focus change. Actions that scroll without moving focus (`center-column`, `center-visible-columns`, touchpad scrolling) put the frame off until the next scroll the emulation sees; changing `center-focused-column` needs a matching change in `internal/niri`.
-- Plugin API: D-Bus, bus name prefix `tools.delphi.Delphics`. Plugins register items and push updates; click callbacks supported.
+- Plugin API (`internal/baritems`): bus name `tools.delphi.Delphics.BarItems` (GTK holds `tools.delphi.Delphics.Bar`), object `/tools/delphi/Delphics/BarItems`, interface `tools.delphi.Delphics.BarItems1`.
+  - `Set(s id, a{sv} props)` creates or updates an item; props `text` (s, ≤ 200 chars), `tooltip` (s), `order` (i, lower is further left, ties by id), `urgent` (b, amber bold). Props left out keep their value; unknown or mistyped props are errors. Empty text hides the item.
+  - `Remove(s id)`; signal `Clicked(s id, u button)`.
+  - An item belongs to the connection that created it: only it can change or remove it, and the item goes when that connection closes. At most 16 items per connection.
+  - Items sit left of the built-in network, battery and clock.
+  - Shell plugins: `delphics bar item [--tooltip T] [--order N] [--on-click CMD] [--urgent-prefix P] ID` shows each stdin line as the item's text, runs CMD on click with `$DELPHICS_BUTTON`, keeps the item after stdin ends until killed, and re-sends it when the bar restarts.
 - Notifications: the bar owns `org.freedesktop.Notifications` (`internal/notify`). The newest one shows in one line in the middle of the bar, with a `+N` count of the others; clicking runs its `default` action and dismisses it. Default timeout 5 s; critical urgency stays until dismissed. No popups, no history.
 - Do-not-disturb: GApplication action `dnd` (`gapplication action tools.delphi.Delphics.Bar dnd`, Super+Ctrl+N). It hides all but critical notifications, drops the ones on screen, and shows `dnd` on the right.
 - GTK bindings: `github.com/diamondburned/gotk4` v0.3.1 (newer versions need a newer GLib than trixie's 2.84). `gotk4-layer-shell` is GTK3-only and unmaintained since 2024-01, so the bar carries a small cgo binding to `libgtk4-layer-shell` (trixie 1.0.4).

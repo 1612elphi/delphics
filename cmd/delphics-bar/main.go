@@ -22,6 +22,7 @@ import (
 	"github.com/diamondburned/gotk4/pkg/pango"
 	"github.com/godbus/dbus/v5"
 
+	"delphics.delphi.tools/internal/baritems"
 	"delphics.delphi.tools/internal/hints"
 	"delphics.delphi.tools/internal/layershell"
 	"delphics.delphi.tools/internal/niri"
@@ -56,6 +57,7 @@ window.delphics-bar { background: #101f10; color: #ebe4d2; font-family: "Open Sa
 .delphics-bar .status { color: #959074; }
 .delphics-bar .clock { font-weight: 700; }
 .delphics-bar .mods { color: #c2ad61; font-weight: 700; }
+.delphics-bar .item.urgent { color: #c2ad61; font-weight: 700; }
 .delphics-bar .hints { color: #959074; }
 .delphics-bar .notification.critical { color: #c2ad61; }
 `
@@ -103,7 +105,8 @@ func activate(app *gtk.Application) {
 	batLabel.AddCSSClass("status")
 	clock := gtk.NewLabel("")
 	clock.AddCSSClass("clock")
-	for _, w := range []gtk.Widgetter{appLabel, mapArea, noteLabel, dndLabel, netLabel, batLabel, clock} {
+	itemBox := gtk.NewBox(gtk.OrientationHorizontal, 14)
+	for _, w := range []gtk.Widgetter{appLabel, mapArea, noteLabel, dndLabel, itemBox, netLabel, batLabel, clock} {
 		bar.Append(w)
 	}
 	hintBox := gtk.NewBox(gtk.OrientationHorizontal, 14)
@@ -230,7 +233,12 @@ func activate(app *gtk.Application) {
 	// ponytail: polls every 5 s; switch to PropertiesChanged signals if the latency matters
 	glib.TimeoutSecondsAdd(5, tick)
 
-	setupNotifications(app, noteLabel, dndLabel)
+	if conn, err := dbus.ConnectSessionBus(); err != nil {
+		log.Printf("session bus: %v", err)
+	} else {
+		setupNotifications(app, conn, noteLabel, dndLabel)
+		setupItems(conn, itemBox)
+	}
 
 	win.SetVisible(true)
 }
@@ -244,12 +252,7 @@ type shownNote struct {
 // setupNotifications makes the bar the notification daemon. The newest notification shows in noteLabel;
 // clicking it runs its default action and dismisses it. The app action "dnd" toggles do-not-disturb,
 // which hides everything but critical notifications.
-func setupNotifications(app *gtk.Application, noteLabel, dndLabel *gtk.Label) {
-	conn, err := dbus.ConnectSessionBus()
-	if err != nil {
-		log.Printf("session bus: %v", err)
-		return
-	}
+func setupNotifications(app *gtk.Application, conn *dbus.Conn, noteLabel, dndLabel *gtk.Label) {
 	// GTK thread only from here on
 	var shown []shownNote
 	seq := 0
@@ -307,6 +310,7 @@ func setupNotifications(app *gtk.Application, noteLabel, dndLabel *gtk.Label) {
 		}
 	}
 
+	var err error
 	srv, err = notify.Serve(conn,
 		func(n notify.Notification) { glib.IdleAdd(func() { add(n) }) },
 		func(id uint32) { glib.IdleAdd(func() { remove(id) }) })
@@ -348,6 +352,41 @@ func setupNotifications(app *gtk.Application, noteLabel, dndLabel *gtk.Label) {
 		render()
 	})
 	app.AddAction(toggle)
+}
+
+// setupItems shows plugin items (internal/baritems) in box, one label each, and reports clicks back.
+func setupItems(conn *dbus.Conn, box *gtk.Box) {
+	var srv *baritems.Server
+	render := func(items []baritems.Item) {
+		for child := box.FirstChild(); child != nil; child = box.FirstChild() {
+			box.Remove(child)
+		}
+		for _, it := range items {
+			if it.Text == "" {
+				continue
+			}
+			label := gtk.NewLabel(it.Text)
+			label.AddCSSClass("status")
+			label.AddCSSClass("item")
+			if it.Urgent {
+				label.AddCSSClass("urgent")
+			}
+			if it.Tooltip != "" {
+				label.SetTooltipText(it.Tooltip)
+			}
+			click := gtk.NewGestureClick()
+			click.SetButton(0)
+			id := it.ID
+			click.ConnectReleased(func(int, float64, float64) { srv.Click(id, uint32(click.CurrentButton())) })
+			label.AddController(click)
+			box.Append(label)
+		}
+	}
+	var err error
+	srv, err = baritems.Serve(conn, func(items []baritems.Item) { glib.IdleAdd(func() { render(items) }) })
+	if err != nil {
+		log.Printf("bar items: %v", err)
+	}
 }
 
 // noteMarkup renders a notification as one line: app, summary, first body line, and how many more are queued.

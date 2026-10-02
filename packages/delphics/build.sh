@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the delphics-bar and delphics-modd .debs from this repo on Debian 13. Usage: build.sh [outdir]
+# Build the delphics-bar, delphics-modd and delphics .debs from this repo on Debian 13. Usage: build.sh [outdir]
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
@@ -16,6 +16,7 @@ sudo -E apt-get install -y --no-install-recommends -t trixie-backports golang-go
 cd "$REPO"
 go build -trimpath -ldflags=-s -o "$WORK/delphics-bar" ./cmd/delphics-bar
 CGO_ENABLED=0 go build -trimpath -ldflags=-s -o "$WORK/delphics-modd" ./cmd/delphics-modd
+CGO_ENABLED=0 go build -trimpath -ldflags=-s -o "$WORK/delphics" ./cmd/delphics
 
 # dpkg-shlibdeps only runs inside a source tree with debian/control
 mkdir -p "$WORK/debian"
@@ -53,3 +54,7 @@ mkdir -p "$MODD/DEBIAN"
 printf '#!/bin/sh\nset -e\nsystemctl daemon-reload\nsystemctl enable delphics-modd.service\nsystemctl restart delphics-modd.service\n' > "$MODD/DEBIAN/postinst"
 printf '#!/bin/sh\nset -e\n[ "$1" = remove ] && systemctl disable --now delphics-modd.service || true\n' > "$MODD/DEBIAN/prerm"
 package delphics-modd "" "$MODD"
+
+CLI="$WORK/pkg-cli"
+install -Dm755 "$WORK/delphics" "$CLI/usr/bin/delphics"
+package delphics "" "$CLI"
