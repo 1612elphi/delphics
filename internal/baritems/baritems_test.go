@@ -69,11 +69,12 @@ func TestItems(t *testing.T) {
 		t.Fatal(err)
 	}
 	next()
-	if err := set(b, "mail", props{"text": dbus.MakeVariant("3 new"), "urgent": dbus.MakeVariant(true)}); err != nil {
+	if err := set(b, "mail", props{"text": dbus.MakeVariant("3 new"), "urgent": dbus.MakeVariant(true),
+		"icon": dbus.MakeVariant("mail-unread-symbolic")}); err != nil {
 		t.Fatal(err)
 	}
 	items := next()
-	if len(items) != 2 || items[0].ID != "mail" || items[1].ID != "vpn" || !items[0].Urgent {
+	if len(items) != 2 || items[0].ID != "mail" || items[1].ID != "vpn" || !items[0].Urgent || items[0].Icon != "mail-unread-symbolic" {
 		t.Fatalf("items = %+v, want mail (order 0) before vpn (order 5)", items)
 	}
 
@@ -90,6 +91,7 @@ func TestItems(t *testing.T) {
 		"unknown prop": set(a, "vpn", props{"colour": dbus.MakeVariant("red")}),
 		"wrong type":   set(a, "vpn", props{"order": dbus.MakeVariant("first")}),
 		"empty id":     set(a, "", props{}),
+		"icon path":    set(a, "vpn", props{"icon": dbus.MakeVariant("/etc/passwd")}),
 		"long text":    set(a, "vpn", props{"text": dbus.MakeVariant(strings.Repeat("x", maxText+1))}),
 	} {
 		if err == nil {

@@ -4,6 +4,7 @@ package baritems
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +20,9 @@ const (
 	Iface   = "tools.delphi.Delphics.BarItems1"
 )
 
+// iconName allows theme names only; empty clears the icon
+var iconName = regexp.MustCompile(`^[A-Za-z0-9_.+-]{0,100}$`)
+
 const (
 	maxID   = 64
 	maxText = 200
@@ -27,13 +31,16 @@ const (
 )
 
 type Item struct {
-	ID      string
-	Text    string
+	ID   string
+	Text string
+	// Icon is an icon theme name such as "battery-level-60-symbolic", shown left of the text
+	Icon    string
 	Tooltip string
 	// Order sorts items left to right; ties sort by ID
-	Order  int32
-	Urgent bool
-	owner  string
+	Order int32
+	// Urgent is amber bold, Bold is bright bold text
+	Urgent, Bold bool
+	owner        string
 }
 
 // Server holds the items. onChange gets the full sorted item list after every change, on a D-Bus goroutine.
@@ -148,14 +155,21 @@ func (s *Server) set(owner, id string, props map[string]dbus.Variant) *dbus.Erro
 			if ok && utf8.RuneCountInString(it.Text) > maxText {
 				return invalid("text longer than %d characters", maxText)
 			}
+		case "icon":
+			it.Icon, ok = v.Value().(string)
+			if ok && !iconName.MatchString(it.Icon) {
+				return invalid("icon must be an icon theme name, not a path")
+			}
 		case "tooltip":
 			it.Tooltip, ok = v.Value().(string)
 		case "order":
 			it.Order, ok = v.Value().(int32)
 		case "urgent":
 			it.Urgent, ok = v.Value().(bool)
+		case "bold":
+			it.Bold, ok = v.Value().(bool)
 		default:
-			return invalid("unknown property %q; known: text, tooltip, order, urgent", k)
+			return invalid("unknown property %q; known: text, icon, tooltip, order, urgent, bold", k)
 		}
 		if !ok {
 			return invalid("property %q has type %s", k, v.Signature())
@@ -199,7 +213,7 @@ func invalid(format string, args ...any) *dbus.Error {
 // methods keeps the exported method set to the API's names only.
 type methods struct{ s *Server }
 
-// Set creates or updates an item. props may hold text (s), tooltip (s), order (i) and urgent (b);
+// Set creates or updates an item. props may hold text (s), icon (s), tooltip (s), order (i), urgent (b) and bold (b);
 // properties left out keep their current value.
 func (m methods) Set(sender dbus.Sender, id string, props map[string]dbus.Variant) *dbus.Error {
 	return m.s.set(string(sender), id, props)

@@ -27,7 +27,6 @@ import (
 	"delphics.delphi.tools/internal/layershell"
 	"delphics.delphi.tools/internal/niri"
 	"delphics.delphi.tools/internal/notify"
-	"delphics.delphi.tools/internal/sysstat"
 )
 
 // niri layout gap from delphics-desktop/niri/config.kdl
@@ -55,9 +54,10 @@ window.delphics-bar { background: #101f10; color: #ebe4d2; font-family: "Open Sa
 .delphics-bar box.bar { min-height: 28px; padding: 0 10px; }
 .delphics-bar .app { font-weight: 700; }
 .delphics-bar .status { color: #959074; }
-.delphics-bar .clock { font-weight: 700; }
 .delphics-bar .mods { color: #c2ad61; font-weight: 700; }
+.delphics-bar .item { -gtk-icon-palette: success #c2ad61, warning #c2ad61, error #c2ad61; }
 .delphics-bar .item.urgent { color: #c2ad61; font-weight: 700; }
+.delphics-bar .item.bold { color: #ebe4d2; font-weight: 700; }
 .delphics-bar .hints { color: #959074; }
 .delphics-bar .notification.critical { color: #c2ad61; }
 `
@@ -99,14 +99,9 @@ func activate(app *gtk.Application) {
 	dndLabel := gtk.NewLabel("dnd")
 	dndLabel.AddCSSClass("status")
 	dndLabel.SetVisible(false)
-	netLabel := gtk.NewLabel("")
-	netLabel.AddCSSClass("status")
-	batLabel := gtk.NewLabel("")
-	batLabel.AddCSSClass("status")
-	clock := gtk.NewLabel("")
-	clock.AddCSSClass("clock")
+	// plugin items, including the built-in network, battery and clock plugins (delphics plugin NAME)
 	itemBox := gtk.NewBox(gtk.OrientationHorizontal, 14)
-	for _, w := range []gtk.Widgetter{appLabel, mapArea, noteLabel, dndLabel, itemBox, netLabel, batLabel, clock} {
+	for _, w := range []gtk.Widgetter{appLabel, mapArea, noteLabel, dndLabel, itemBox} {
 		bar.Append(w)
 	}
 	hintBox := gtk.NewBox(gtk.OrientationHorizontal, 14)
@@ -216,22 +211,6 @@ func activate(app *gtk.Application) {
 			time.Sleep(2 * time.Second)
 		}
 	}()
-
-	stat, err := sysstat.New()
-	if err != nil {
-		log.Printf("system bus: %v", err)
-	}
-	tick := func() bool {
-		clock.SetText(time.Now().Format("15:04"))
-		if stat != nil {
-			netLabel.SetText(stat.Network())
-			batLabel.SetText(stat.Battery())
-		}
-		return true
-	}
-	tick()
-	// ponytail: polls every 5 s; switch to PropertiesChanged signals if the latency matters
-	glib.TimeoutSecondsAdd(5, tick)
 
 	if conn, err := dbus.ConnectSessionBus(); err != nil {
 		log.Printf("session bus: %v", err)
@@ -362,24 +341,36 @@ func setupItems(conn *dbus.Conn, box *gtk.Box) {
 			box.Remove(child)
 		}
 		for _, it := range items {
-			if it.Text == "" {
+			if it.Text == "" && it.Icon == "" {
 				continue
 			}
-			label := gtk.NewLabel(it.Text)
-			label.AddCSSClass("status")
-			label.AddCSSClass("item")
+			// symbolic icons take the item's text color
+			item := gtk.NewBox(gtk.OrientationHorizontal, 4)
+			item.AddCSSClass("status")
+			item.AddCSSClass("item")
 			if it.Urgent {
-				label.AddCSSClass("urgent")
+				item.AddCSSClass("urgent")
+			}
+			if it.Bold {
+				item.AddCSSClass("bold")
+			}
+			if it.Icon != "" {
+				icon := gtk.NewImageFromIconName(it.Icon)
+				icon.SetPixelSize(16)
+				item.Append(icon)
+			}
+			if it.Text != "" {
+				item.Append(gtk.NewLabel(it.Text))
 			}
 			if it.Tooltip != "" {
-				label.SetTooltipText(it.Tooltip)
+				item.SetTooltipText(it.Tooltip)
 			}
 			click := gtk.NewGestureClick()
 			click.SetButton(0)
 			id := it.ID
 			click.ConnectReleased(func(int, float64, float64) { srv.Click(id, uint32(click.CurrentButton())) })
-			label.AddController(click)
-			box.Append(label)
+			item.AddController(click)
+			box.Append(item)
 		}
 	}
 	var err error

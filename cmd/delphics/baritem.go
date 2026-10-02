@@ -8,9 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"os/signal"
 	"strings"
-	"syscall"
 
 	"github.com/godbus/dbus/v5"
 
@@ -32,7 +30,9 @@ flags:
 		fs.PrintDefaults()
 	}
 	tooltip := fs.String("tooltip", "", "tooltip `text`")
+	icon := fs.String("icon", "", "icon theme `name` shown left of the text, e.g. network-vpn-symbolic")
 	order := fs.Int("order", 0, "position among plugin items, lower is further left")
+	bold := fs.Bool("bold", false, "bright bold text")
 	onClick := fs.String("on-click", "", "shell `command` to run on click; $DELPHICS_BUTTON is 1, 2 or 3")
 	urgentPrefix := fs.String("urgent-prefix", "", "lines starting with `prefix` are shown highlighted, without the prefix")
 	if err := fs.Parse(args); err == flag.ErrHelp {
@@ -44,7 +44,6 @@ flags:
 		fs.Usage()
 		return 2
 	}
-	id := fs.Arg(0)
 
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
@@ -52,32 +51,14 @@ flags:
 		return 1
 	}
 	defer conn.Close()
-
-	props := map[string]dbus.Variant{
-		"text":    dbus.MakeVariant(""),
-		"tooltip": dbus.MakeVariant(*tooltip),
-		"order":   dbus.MakeVariant(int32(*order)),
-		"urgent":  dbus.MakeVariant(false),
-	}
-	set := func() {
-		err := conn.Object(baritems.BusName, baritems.Path).Call(baritems.Iface+".Set", 0, id, props).Err
-		if err != nil {
-			log.Printf("bar: %v", err)
-		}
-	}
-
-	if err := conn.AddMatchSignal(dbus.WithMatchInterface(baritems.Iface), dbus.WithMatchMember("Clicked")); err != nil {
+	item, err := baritems.NewClient(conn, fs.Arg(0))
+	if err != nil {
 		log.Printf("bar: %v", err)
 		return 1
 	}
-	// a restarted bar starts empty; send the item again when it comes back
-	if err := conn.AddMatchSignal(dbus.WithMatchInterface("org.freedesktop.DBus"), dbus.WithMatchMember("NameOwnerChanged"),
-		dbus.WithMatchArg(0, baritems.BusName)); err != nil {
+	if err := item.Set(baritems.Props{"icon": *icon, "tooltip": *tooltip, "order": int32(*order), "bold": *bold}); err != nil {
 		log.Printf("bar: %v", err)
-		return 1
 	}
-	signals := make(chan *dbus.Signal, 16)
-	conn.Signal(signals)
 
 	lines := make(chan string)
 	go func() {
@@ -86,10 +67,7 @@ flags:
 			lines <- strings.TrimRight(sc.Text(), "\r")
 		}
 	}()
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-
-	set()
+	stop := stopSignals()
 	for {
 		select {
 		case line := <-lines:
@@ -97,22 +75,20 @@ flags:
 			if *urgentPrefix != "" {
 				line, urgent = strings.CutPrefix(line, *urgentPrefix)
 			}
-			props["text"], props["urgent"] = dbus.MakeVariant(line), dbus.MakeVariant(urgent)
-			set()
-		case sig := <-signals:
-			switch {
-			case sig.Name == "org.freedesktop.DBus.NameOwnerChanged" && len(sig.Body) == 3 && sig.Body[2] != "":
-				set()
-			case sig.Name == baritems.Iface+".Clicked" && len(sig.Body) == 2 && sig.Body[0] == id && *onClick != "":
-				button, _ := sig.Body[1].(uint32)
-				cmd := exec.Command("sh", "-c", *onClick)
-				cmd.Env = append(os.Environ(), fmt.Sprintf("DELPHICS_BUTTON=%d", button))
-				cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-				if err := cmd.Start(); err != nil {
-					log.Printf("on-click: %v", err)
-				} else {
-					go cmd.Wait()
-				}
+			if err := item.Set(baritems.Props{"text": line, "urgent": urgent}); err != nil {
+				log.Printf("bar: %v", err)
+			}
+		case button := <-item.Clicks:
+			if *onClick == "" {
+				continue
+			}
+			cmd := exec.Command("sh", "-c", *onClick)
+			cmd.Env = append(os.Environ(), fmt.Sprintf("DELPHICS_BUTTON=%d", button))
+			cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+			if err := cmd.Start(); err != nil {
+				log.Printf("on-click: %v", err)
+			} else {
+				go cmd.Wait()
 			}
 		case <-stop:
 			return 0

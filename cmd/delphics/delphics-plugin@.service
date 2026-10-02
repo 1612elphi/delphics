@@ -1,0 +1,12 @@
+[Unit]
+Description=DELPHICS bar plugin %i
+PartOf=graphical-session.target
+After=graphical-session.target
+Requisite=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/delphics plugin %i
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target

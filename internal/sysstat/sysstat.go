@@ -2,8 +2,6 @@
 package sysstat
 
 import (
-	"fmt"
-
 	"github.com/godbus/dbus/v5"
 )
 
@@ -29,52 +27,77 @@ const (
 	upFull     = 4
 )
 
-// Battery returns e.g. "bat 64%", "chg 64%", or "" when there is no battery.
-func (s *Stat) Battery() string {
+type Battery struct {
+	Present  bool
+	Percent  float64
+	Charging bool
+	Full     bool
+}
+
+// Battery reads UPower's display device, the combined state of all batteries.
+func (s *Stat) Battery() Battery {
 	const dev = "/org/freedesktop/UPower/devices/DisplayDevice"
 	const iface = "org.freedesktop.UPower.Device"
 	present, err := s.prop("org.freedesktop.UPower", dev, iface, "IsPresent")
 	if err != nil || !present.Value().(bool) {
-		return ""
+		return Battery{}
 	}
 	pct, err := s.prop("org.freedesktop.UPower", dev, iface, "Percentage")
 	if err != nil {
-		return ""
+		return Battery{}
 	}
+	b := Battery{Present: true, Percent: pct.Value().(float64)}
 	state, _ := s.prop("org.freedesktop.UPower", dev, iface, "State")
-	label := "bat"
-	if st, ok := state.Value().(uint32); ok && (st == upCharging || st == upFull) {
-		label = "chg"
-	}
-	return fmt.Sprintf("%s %.0f%%", label, pct.Value().(float64))
+	st, _ := state.Value().(uint32)
+	b.Charging, b.Full = st == upCharging, st == upFull
+	return b
 }
 
-// Network returns the primary connection, e.g. "HomeNet 72%", "wired", or "offline".
-func (s *Stat) Network() string {
+type NetKind int
+
+const (
+	Offline NetKind = iota
+	Wired
+	Wireless
+	// Other is any other primary connection type, such as a VPN or a modem
+	Other
+)
+
+type Network struct {
+	Kind NetKind
+	// Name is the connection name, the SSID for Wi-Fi
+	Name string
+	// Strength is the Wi-Fi signal in percent, -1 when unknown
+	Strength int
+}
+
+// Network reads NetworkManager's primary connection.
+func (s *Stat) Network() Network {
 	const nm = "org.freedesktop.NetworkManager"
 	primary, err := s.prop(nm, "/org/freedesktop/NetworkManager", nm, "PrimaryConnection")
 	if err != nil {
-		return "offline"
+		return Network{}
 	}
 	conn := primary.Value().(dbus.ObjectPath)
 	if conn == "/" {
-		return "offline"
+		return Network{}
 	}
 	id, err := s.prop(nm, conn, nm+".Connection.Active", "Id")
 	if err != nil {
-		return "offline"
+		return Network{}
 	}
+	n := Network{Kind: Other, Name: id.Value().(string), Strength: -1}
 	typ, _ := s.prop(nm, conn, nm+".Connection.Active", "Type")
-	if t, _ := typ.Value().(string); t != "802-11-wireless" {
-		return "wired"
+	switch t, _ := typ.Value().(string); t {
+	case "802-3-ethernet":
+		n.Kind = Wired
+	case "802-11-wireless":
+		n.Kind = Wireless
+		if ap, err := s.prop(nm, conn, nm+".Connection.Active", "SpecificObject"); err == nil {
+			if st, err := s.prop(nm, ap.Value().(dbus.ObjectPath), nm+".AccessPoint", "Strength"); err == nil {
+				n.Strength = int(st.Value().(byte))
+			}
+		}
 	}
-	ap, err := s.prop(nm, conn, nm+".Connection.Active", "SpecificObject")
-	if err != nil {
-		return id.Value().(string)
-	}
-	strength, err := s.prop(nm, ap.Value().(dbus.ObjectPath), nm+".AccessPoint", "Strength")
-	if err != nil {
-		return id.Value().(string)
-	}
-	return fmt.Sprintf("%s %d%%", id.Value().(string), strength.Value().(byte))
+	return n
 }

@@ -25,6 +25,7 @@ Debian-based Extremely Lightweight Pretty and Harmoniously Integrated Computing 
 | Compositor | niri (scrolling tiling), one workspace in the UX | DELPHICS repo |
 | X11 apps | xwayland-satellite | DELPHICS repo |
 | Login | greetd + tuigreet | trixie |
+| Icons | Adwaita symbolic (`adwaita-icon-theme` 48) in the bar | trixie |
 | Lock / idle | gtklock + swayidle | trixie |
 | Launcher | rofi 2.0 (native Wayland) | DELPHICS repo (backport from sid) |
 | Notifications | implemented in `delphics-bar` (org.freedesktop.Notifications) | own |
@@ -110,11 +111,13 @@ delphitools-cli and delphitools-lnx: planned, packaging undecided.
 - Data: niri IPC event stream (JSON over `$NIRI_SOCKET`) for windows, columns, focus.
 - Minimap: one tile per window (stacked windows included), the screen as a frame, off-screen tiles dimmed; true-to-screen scale with fixed 3 px gaps, panned past 240 px. niri's IPC has no scroll position for tiled windows (`tile_pos_in_workspace_view` is floating-only in 26.04), so the bar re-runs niri's `compute_new_view_offset` for `center-focused-column "never"` on every focus change. Actions that scroll without moving focus (`center-column`, `center-visible-columns`, touchpad scrolling) put the frame off until the next scroll the emulation sees; changing `center-focused-column` needs a matching change in `internal/niri`.
 - Plugin API (`internal/baritems`): bus name `tools.delphi.Delphics.BarItems` (GTK holds `tools.delphi.Delphics.Bar`), object `/tools/delphi/Delphics/BarItems`, interface `tools.delphi.Delphics.BarItems1`.
-  - `Set(s id, a{sv} props)` creates or updates an item; props `text` (s, ≤ 200 chars), `tooltip` (s), `order` (i, lower is further left, ties by id), `urgent` (b, amber bold). Props left out keep their value; unknown or mistyped props are errors. Empty text hides the item.
+  - `Set(s id, a{sv} props)` creates or updates an item; props `text` (s, ≤ 200 chars), `icon` (s, an icon theme name, no paths), `tooltip` (s), `order` (i, lower is further left, ties by id), `urgent` (b, amber bold), `bold` (b, bright bold). Props left out keep their value; unknown or mistyped props are errors. An item with neither text nor icon is hidden.
   - `Remove(s id)`; signal `Clicked(s id, u button)`.
   - An item belongs to the connection that created it: only it can change or remove it, and the item goes when that connection closes. At most 16 items per connection.
-  - Items sit left of the built-in network, battery and clock.
-  - Shell plugins: `delphics bar item [--tooltip T] [--order N] [--on-click CMD] [--urgent-prefix P] ID` shows each stdin line as the item's text, runs CMD on click with `$DELPHICS_BUTTON`, keeps the item after stdin ends until killed, and re-sends it when the bar restarts.
+  - Icons are drawn at 16 px in the item's text color; Adwaita's success/warning/error colors (e.g. the green charge fill) are remapped to the palette's primary.
+  - Network, battery and clock are plugins too: `delphics plugin network|battery|clock`, one `delphics-plugin@NAME.service` user unit each, enabled globally by the `delphics` package (disable one with `systemctl --user disable --now delphics-plugin@battery`). Orders 100/110/120 keep them right of third-party items (default order 0). Network and battery poll every 5 s; the clock wakes on the minute and shows the date as tooltip.
+  - Plugins use `baritems.Client`, which re-sends the item when the bar (re)starts, so start order does not matter.
+  - Shell plugins: `delphics bar item [--icon NAME] [--tooltip T] [--order N] [--bold] [--on-click CMD] [--urgent-prefix P] ID` shows each stdin line as the item's text, runs CMD on click with `$DELPHICS_BUTTON`, keeps the item after stdin ends until killed, and re-sends it when the bar restarts.
 - Notifications: the bar owns `org.freedesktop.Notifications` (`internal/notify`). The newest one shows in one line in the middle of the bar, with a `+N` count of the others; clicking runs its `default` action and dismisses it. Default timeout 5 s; critical urgency stays until dismissed. No popups, no history.
 - Do-not-disturb: GApplication action `dnd` (`gapplication action tools.delphi.Delphics.Bar dnd`, Super+Ctrl+N). It hides all but critical notifications, drops the ones on screen, and shows `dnd` on the right.
 - GTK bindings: `github.com/diamondburned/gotk4` v0.3.1 (newer versions need a newer GLib than trixie's 2.84). `gotk4-layer-shell` is GTK3-only and unmaintained since 2024-01, so the bar carries a small cgo binding to `libgtk4-layer-shell` (trixie 1.0.4).
