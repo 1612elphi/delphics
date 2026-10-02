@@ -33,7 +33,10 @@ import (
 const niriGap = 8
 
 // milliseconds Super must be held before the hint view replaces the bar; shorter taps are shortcuts
-const hintDelay = 350
+const hintDelay = 600
+
+// milliseconds of the crossfade between the bar and the hint view
+const hintFade = 200
 
 const moddSocket = "/run/delphics-modd/modd.sock"
 
@@ -119,6 +122,8 @@ func activate(app *gtk.Application) {
 	stack.AddNamed(bar, "bar")
 	stack.AddNamed(hintBox, "hints")
 	stack.SetVisibleChildName("bar")
+	stack.SetTransitionType(gtk.StackTransitionTypeCrossfade)
+	stack.SetTransitionDuration(hintFade)
 	win.SetChild(stack)
 
 	var mu sync.Mutex
@@ -173,7 +178,9 @@ func activate(app *gtk.Application) {
 
 	// hint view: shown while Super is held past hintDelay; follows modifier changes while shown
 	var mask byte
-	pending := false
+	// pending is the running hintDelay timer, 0 when none; releasing Super cancels it,
+	// so a quick tap followed by a new press starts the delay over
+	var pending glib.SourceHandle
 	showHints := func() {
 		modLabel.SetText(modNames(mask))
 		hintLabel.SetMarkup(hintMarkup(hints.For(hints.Load(niriConfigPath()), mask)))
@@ -183,16 +190,17 @@ func activate(app *gtk.Application) {
 		mask = m
 		switch {
 		case m&hints.Super == 0:
+			if pending != 0 {
+				glib.SourceRemove(pending)
+				pending = 0
+			}
 			stack.SetVisibleChildName("bar")
 		case stack.VisibleChildName() == "hints":
 			showHints()
-		case !pending:
-			pending = true
-			glib.TimeoutAdd(hintDelay, func() bool {
-				pending = false
-				if mask&hints.Super != 0 {
-					showHints()
-				}
+		case pending == 0:
+			pending = glib.TimeoutAdd(hintDelay, func() bool {
+				pending = 0
+				showHints()
 				return false
 			})
 		}
