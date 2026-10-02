@@ -69,6 +69,10 @@ window.delphics-bar { background: #101f10; color: #ebe4d2; font-family: "Open Sa
 .delphics-bar popover.menu modelbutton:hover arrow, .delphics-bar popover.menu modelbutton:selected arrow { background: #213321; color: #ebe4d2; }
 .delphics-bar popover.menu modelbutton:disabled { color: #959074; }
 .delphics-bar popover.menu modelbutton check { color: #c2ad61; }
+.delphics-bar popover.menu box.slider { padding: 2px 14px; }
+.delphics-bar popover.menu scale trough { background: #213321; border: none; outline: none; box-shadow: none; border-radius: 0; min-height: 4px; }
+.delphics-bar popover.menu scale highlight { background: #c2ad61; border: none; box-shadow: none; border-radius: 0; }
+.delphics-bar popover.menu scale slider { background: #ebe4d2; border-radius: 0; min-width: 10px; min-height: 14px; margin: -6px 0; box-shadow: none; border: none; }
 .delphics-bar popover.menu separator { background: #213321; }
 `
 
@@ -104,8 +108,18 @@ func activate(app *gtk.Application) {
 	// the system menu hangs off a box around the label; see popupMenu
 	appBox := gtk.NewBox(gtk.OrientationHorizontal, 0)
 	appBox.Append(appLabel)
+	var appMenu *openMenu
+	var appClosed time.Time
 	appClick := gtk.NewGestureClick()
-	appClick.ConnectReleased(func(int, float64, float64) { popupMenu(appBox, systemMenu(haveWindow), runSystem) })
+	appClick.ConnectReleased(func(int, float64, float64) {
+		switch {
+		case appMenu != nil:
+			appMenu.pop.Popdown()
+		case time.Since(appClosed) > reopenGuard:
+			appMenu = popupMenu(appBox, systemMenu(haveWindow), menuHandlers{activate: runSystem})
+			appMenu.pop.ConnectClosed(func() { appMenu, appClosed = nil, time.Now() })
+		}
+	})
 	appBox.AddController(appClick)
 	mapArea := gtk.NewDrawingArea()
 	mapArea.SetContentHeight(28)
@@ -352,14 +366,20 @@ func setupNotifications(app *gtk.Application, conn *dbus.Conn, noteLabel, dndLab
 	app.AddAction(toggle)
 }
 
+// reopenGuard: with a mouse, clicking the item of an open menu closes the menu on press (GTK's
+// autohide) and would reopen it on release; a release this soon after the close keeps it closed.
+const reopenGuard = 300 * time.Millisecond
+
 // itemView is the widget of one plugin item; it lives as long as the item, so an open menu survives updates.
 type itemView struct {
 	box   *gtk.Box
 	icon  *gtk.Image
 	label *gtk.Label
 	item  baritems.Item
-	// menu is the open popover, nil when closed
-	menu *gtk.PopoverMenu
+	// menu is the open menu, nil when closed
+	menu *openMenu
+	// closed is when the menu last closed; see reopenGuard
+	closed time.Time
 }
 
 // setupItems shows plugin items (internal/baritems) in box and reports clicks and menu choices back.
@@ -377,14 +397,27 @@ func setupItems(conn *dbus.Conn, box *gtk.Box) {
 		click.SetButton(0)
 		click.ConnectReleased(func(int, float64, float64) {
 			button := click.CurrentButton()
-			if button == 1 && len(v.item.Menu) > 0 && v.menu == nil {
-				pop := popupMenu(v.box, pluginMenu(v.item.Menu), func(entry string) { srv.Activate(id, entry) })
-				v.menu = pop
-				pop.ConnectClosed(func() { v.menu = nil })
+			switch {
+			case button != 1 || len(v.item.Menu) == 0:
+			case v.menu != nil:
+				// touch input does not close a popover on a tap outside, so the item closes its own menu
+				v.menu.pop.Popdown()
+			case time.Since(v.closed) > reopenGuard:
+				v.menu = popupMenu(v.box, pluginMenu(v.item.Menu), menuHandlers{
+					activate: func(entry string) { srv.Activate(id, entry) },
+					change:   func(entry string, value float64) { srv.Change(id, entry, value) },
+				})
+				v.menu.pop.ConnectClosed(func() { v.menu, v.closed = nil, time.Now() })
 			}
 			srv.Click(id, uint32(button))
 		})
 		v.box.AddController(click)
+		scroll := gtk.NewEventControllerScroll(gtk.EventControllerScrollVertical)
+		scroll.ConnectScroll(func(_, dy float64) bool {
+			srv.Scroll(id, dy)
+			return true
+		})
+		v.box.AddController(scroll)
 		return v
 	}
 	render := func(items []baritems.Item) {
@@ -415,10 +448,7 @@ func setupItems(conn *dbus.Conn, box *gtk.Box) {
 			v.box.SetTooltipText(it.Tooltip)
 			v.box.SetVisible(it.Text != "" || it.Icon != "")
 			if menuChanged {
-				id := it.ID
-				model, group := buildMenu(pluginMenu(it.Menu), func(entry string) { srv.Activate(id, entry) })
-				v.menu.SetMenuModel(model)
-				v.menu.InsertActionGroup("m", group)
+				v.menu.update(pluginMenu(it.Menu))
 			}
 			box.ReorderChildAfter(v.box, prev)
 			prev = v.box
@@ -426,7 +456,7 @@ func setupItems(conn *dbus.Conn, box *gtk.Box) {
 		for id, v := range views {
 			if !seen[id] {
 				if v.menu != nil {
-					v.menu.Popdown()
+					v.menu.pop.Popdown()
 				}
 				box.Remove(v.box)
 				delete(views, id)

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"delphics.delphi.tools/internal/audio"
 	"delphics.delphi.tools/internal/sysstat"
 )
 
@@ -37,6 +38,18 @@ func TestPluginIconsExist(t *testing.T) {
 	}
 	for _, k := range []sysstat.NetKind{sysstat.Offline, sysstat.Wired, sysstat.Other} {
 		icons = append(icons, networkProps(sysstat.Network{Kind: k})["icon"].(string))
+	}
+	for v := 0.0; v <= 1.2; v += 0.01 {
+		icons = append(icons, volumeIcon(audio.State{HasOutput: true, Volume: v}))
+	}
+	icons = append(icons, volumeIcon(audio.State{HasOutput: true, Muted: true}), brightnessProps(0.5)["icon"].(string))
+	for _, b := range []sysstat.Bluetooth{{HasAdapter: true}, {HasAdapter: true, Powered: true}} {
+		icons = append(icons, bluetoothProps(b)["icon"].(string))
+	}
+	for st := sysstat.ModemFailed; st <= sysstat.ModemRegistered; st++ {
+		for sig := 0; sig <= 100; sig += 5 {
+			icons = append(icons, wwanIcon(sysstat.Modem{State: st, Signal: sig}))
+		}
 	}
 	seen := map[string]bool{}
 	for _, icon := range icons {
@@ -109,5 +122,48 @@ func TestMenus(t *testing.T) {
 	}
 	if b := batteryMenu(sysstat.Battery{Present: true, Percent: 97, Charging: true, Seconds: 958}, "", nil); b[0].Label != "97%, full in 16 min" {
 		t.Errorf("charging status: %q", b[0].Label)
+	}
+}
+
+func TestMoreMenus(t *testing.T) {
+	v := volumeMenu(audio.State{HasOutput: true, Volume: 0.4, Muted: true, HasInput: true, InputVolume: 1,
+		Outputs: []audio.Device{{ID: 55, Description: "Speakers", Default: true}, {ID: 57, Description: "HDMI"}},
+		Inputs:  []audio.Device{{ID: 56, Description: "Mic", Default: true}}})
+	var ids []string
+	for _, e := range v {
+		ids = append(ids, e.ID)
+	}
+	// one input: no input device choice
+	if got := strings.Join(ids, ","); got != "out,mute,in,micmute,dev:55,dev:57" {
+		t.Errorf("volume menu ids %s", got)
+	}
+	if !v[0].Slider || v[0].Value != 0.4 || !v[1].Checked || !v[4].Checked || !v[4].Section {
+		t.Errorf("volume menu %+v", v)
+	}
+	if p := volumeProps(audio.State{}); p["icon"] != "" {
+		t.Error("no output must hide the item")
+	}
+
+	b := sysstat.Bluetooth{HasAdapter: true, Powered: true, Devices: []sysstat.BTDevice{{Key: "dev_1", Name: "Buds", Connected: true}, {Key: "dev_2", Name: "Mouse"}}}
+	if p := bluetoothProps(b); p["text"] != "Buds" || p["tooltip"] != "Connected to Buds" {
+		t.Errorf("bluetooth props %v", p)
+	}
+	if m := bluetoothMenu(b); len(m) != 4 || m[1].ID != "dev:dev_1" || !m[1].Checked || m[2].Checked {
+		t.Errorf("bluetooth menu %+v", m)
+	}
+	if m := bluetoothMenu(sysstat.Bluetooth{HasAdapter: true}); len(m) != 2 || m[0].Checked {
+		t.Errorf("bluetooth off menu %+v", m)
+	}
+
+	m := sysstat.Modem{State: sysstat.ModemRegistered, Operator: "Telekom.de", Tech: "LTE", Signal: 6}
+	if p := wwanProps(m); p["tooltip"] != "Telekom.de · LTE · 6%" || p["text"] != "" || p["icon"] != "network-cellular-signal-none-symbolic" {
+		t.Errorf("wwan props %v", p)
+	}
+	m.DataOn = true
+	if p := wwanProps(m); p["text"] != "LTE" {
+		t.Errorf("wwan with data shows the technology: %v", p)
+	}
+	if w := wwanMenu(sysstat.Modem{State: sysstat.ModemOff}); !w[1].Disabled || w[2].Checked {
+		t.Errorf("modem off menu %+v", w)
 	}
 }

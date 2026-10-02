@@ -85,6 +85,35 @@ func TestClientSurvivesBarRestarts(t *testing.T) {
 		t.Fatal("no activation")
 	}
 
+	// sliders: the last of a burst always arrives; scrolls arrive
+	if err := c.Set(Props{"menu": []MenuEntry{{ID: "vol", Label: "Output", Slider: true, Value: 0.4}}}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 20; i++ {
+		srv.Change("clock", "vol", float64(i)/20)
+	}
+	srv.Scroll("clock", -1)
+	var last Change
+	timeout := time.After(2 * time.Second)
+	for last.Value != 1 {
+		select {
+		case last = <-c.Changes:
+		case <-timeout:
+			t.Fatalf("last slider value never arrived, got %+v", last)
+		}
+	}
+	if last.Entry != "vol" {
+		t.Errorf("change entry %q", last.Entry)
+	}
+	select {
+	case d := <-c.Scrolls:
+		if d != -1 {
+			t.Errorf("scroll %v", d)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no scroll")
+	}
+
 	// bar restarts: the client sends its merged properties again
 	if err := c.Set(Props{"text": "12:01"}); err != nil {
 		t.Fatal(err)

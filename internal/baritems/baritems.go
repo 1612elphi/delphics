@@ -98,6 +98,17 @@ func (s *Server) Activate(id, entry string) {
 	s.conn.Emit(Path, Iface+".Activated", id, entry)
 }
 
+// Change tells the item's plugin that the user moved a menu slider to value (0 to 1).
+func (s *Server) Change(id, entry string, value float64) {
+	s.conn.Emit(Path, Iface+".Changed", id, entry, value)
+}
+
+// Scroll tells the item's plugin that the user scrolled on the item; delta is positive downwards,
+// 1 per wheel notch.
+func (s *Server) Scroll(id string, delta float64) {
+	s.conn.Emit(Path, Iface+".Scrolled", id, delta)
+}
+
 func (s *Server) dropOwner(owner string) {
 	s.mu.Lock()
 	changed := false
@@ -244,4 +255,6 @@ const introspection = introspect.IntrospectDeclarationString + `<node>
   <method name="Remove"><arg name="id" direction="in" type="s"/></method>
   <signal name="Clicked"><arg name="id" type="s"/><arg name="button" type="u"/></signal>
   <signal name="Activated"><arg name="id" type="s"/><arg name="entry" type="s"/></signal>
+  <signal name="Changed"><arg name="id" type="s"/><arg name="entry" type="s"/><arg name="value" type="d"/></signal>
+  <signal name="Scrolled"><arg name="id" type="s"/><arg name="delta" type="d"/></signal>
  </interface>` + introspect.IntrospectDataString + `</node>`

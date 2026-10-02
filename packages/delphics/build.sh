@@ -23,7 +23,7 @@ mkdir -p "$WORK/debian"
 printf 'Source: delphics\n\nPackage: delphics\nArchitecture: any\n' > "$WORK/debian/control"
 shlibs() { (cd "$WORK" && dpkg-shlibdeps -O "$1" | sed -n 's/^shlibs:Depends=//p'); }
 
-package() { # name depends pkgdir
+package() { # name depends pkgdir [recommends]
     mkdir -p "$3/DEBIAN"
     cat > "$3/DEBIAN/control" <<EOF
 Package: $1
@@ -31,6 +31,7 @@ Version: $VERSION
 Architecture: amd64
 Maintainer: Ruby <rmv@rmv.fyi>
 ${2:+Depends: $2
+}${4:+Recommends: $4
 }Section: x11
 Priority: optional
 Description: $1
@@ -59,7 +60,9 @@ CLI="$WORK/pkg-cli"
 install -Dm755 "$WORK/delphics" "$CLI/usr/bin/delphics"
 install -Dm644 "$REPO/cmd/delphics/delphics-plugin@.service" "$CLI/usr/lib/systemd/user/delphics-plugin@.service"
 mkdir -p "$CLI/DEBIAN"
-PLUGINS="delphics-plugin@network.service delphics-plugin@battery.service delphics-plugin@clock.service"
+PLUGINS=""
+for p in brightness volume bluetooth wwan network battery clock; do PLUGINS="$PLUGINS delphics-plugin@$p.service"; done
 printf '#!/bin/sh\nset -e\nsystemctl --global enable %s\n' "$PLUGINS" > "$CLI/DEBIAN/postinst"
 printf '#!/bin/sh\nset -e\n[ "$1" = remove ] && systemctl --global disable %s || true\n' "$PLUGINS" > "$CLI/DEBIAN/prerm"
-package delphics "upower, network-manager, adwaita-icon-theme" "$CLI"
+# bluez and modemmanager are optional: without them the bluetooth and wwan items stay hidden
+package delphics "upower, network-manager, adwaita-icon-theme, wireplumber, pipewire-bin" "$CLI" "bluez, modemmanager"

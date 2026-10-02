@@ -23,6 +23,10 @@ type MenuEntry struct {
 	Checked bool
 	// Section starts a new group, drawn with a separator above it
 	Section bool
+	// Slider makes the entry a slider from 0 to 1 at Value, with Label beside it; moving it emits
+	// Changed(item, ID, value)
+	Slider bool
+	Value  float64
 }
 
 // Menu converts entries to the D-Bus form of the "menu" property, aa{sv}.
@@ -41,6 +45,9 @@ func Menu(entries []MenuEntry) []map[string]dbus.Variant {
 		}
 		if e.Section {
 			m["section"] = dbus.MakeVariant(true)
+		}
+		if e.Slider {
+			m["slider"] = dbus.MakeVariant(e.Value)
 		}
 		out = append(out, m)
 	}
@@ -76,8 +83,11 @@ func parseMenu(v dbus.Variant) ([]MenuEntry, *dbus.Error) {
 				e.Checked, ok = v.Value().(bool)
 			case "section":
 				e.Section, ok = v.Value().(bool)
+			case "slider":
+				e.Value, ok = v.Value().(float64)
+				e.Slider, e.Value = true, min(max(e.Value, 0), 1)
 			default:
-				return nil, invalid("menu entry %d: unknown key %q; known: id, label, enabled, checked, section", i, k)
+				return nil, invalid("menu entry %d: unknown key %q; known: id, label, enabled, checked, section, slider", i, k)
 			}
 			if !ok {
 				return nil, invalid("menu entry %d: bad %q", i, k)

@@ -25,17 +25,20 @@ const (
 	orderClock   = 120
 )
 
+const pluginNames = "clock|network|battery|volume|brightness|bluetooth|wwan"
+
 // plugin runs one built-in bar plugin until killed.
 func plugin(args []string) int {
 	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: delphics plugin clock|network|battery")
+		fmt.Fprintln(os.Stderr, "usage: delphics plugin "+pluginNames)
 		return 2
 	}
 	run := map[string]func(*dbus.Conn, *baritems.Client, <-chan os.Signal) error{
 		"clock": runClock, "network": runNetwork, "battery": runBattery,
+		"volume": runVolume, "brightness": runBrightness, "bluetooth": runBluetooth, "wwan": runWWAN,
 	}[args[0]]
 	if run == nil {
-		fmt.Fprintf(os.Stderr, "unknown plugin %q; known: clock, network, battery\n", args[0])
+		fmt.Fprintf(os.Stderr, "unknown plugin %q; known: %s\n", args[0], pluginNames)
 		return 2
 	}
 	conn, err := dbus.ConnectSessionBus()

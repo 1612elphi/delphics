@@ -24,11 +24,21 @@ type Client struct {
 	Clicks chan uint32
 	// Activations receives the ID of every chosen menu entry, dropped while full like Clicks.
 	Activations chan string
+	// Changes receives slider moves; when full the oldest is dropped, so the last value always arrives.
+	Changes chan Change
+	// Scrolls receives scroll deltas on the item, positive downwards; dropped while full.
+	Scrolls chan float64
+}
+
+type Change struct {
+	Entry string
+	Value float64
 }
 
 func NewClient(conn *dbus.Conn, id string) (*Client, error) {
-	c := &Client{conn: conn, id: id, props: map[string]dbus.Variant{}, Clicks: make(chan uint32, 4), Activations: make(chan string, 4)}
-	for _, member := range []string{"Clicked", "Activated"} {
+	c := &Client{conn: conn, id: id, props: map[string]dbus.Variant{}, Clicks: make(chan uint32, 4), Activations: make(chan string, 4),
+		Changes: make(chan Change, 8), Scrolls: make(chan float64, 16)}
+	for _, member := range []string{"Clicked", "Activated", "Changed", "Scrolled"} {
 		if err := conn.AddMatchSignal(dbus.WithMatchInterface(Iface), dbus.WithMatchMember(member), dbus.WithMatchArg(0, id)); err != nil {
 			return nil, err
 		}
@@ -50,6 +60,28 @@ func NewClient(conn *dbus.Conn, id string) (*Client, error) {
 				if button, ok := sig.Body[1].(uint32); ok {
 					select {
 					case c.Clicks <- button:
+					default:
+					}
+				}
+			case sig.Name == Iface+".Changed" && len(sig.Body) == 3 && sig.Body[0] == id:
+				entry, _ := sig.Body[1].(string)
+				value, _ := sig.Body[2].(float64)
+				for {
+					select {
+					case c.Changes <- Change{entry, value}:
+					default:
+						select {
+						case <-c.Changes:
+						default:
+						}
+						continue
+					}
+					break
+				}
+			case sig.Name == Iface+".Scrolled" && len(sig.Body) == 2 && sig.Body[0] == id:
+				if delta, ok := sig.Body[1].(float64); ok {
+					select {
+					case c.Scrolls <- delta:
 					default:
 					}
 				}

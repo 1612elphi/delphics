@@ -10,7 +10,8 @@ const usage = `usage: delphics <command>
 
 commands:
   bar item [flags] ID   show stdin lines as a bar item; run "delphics bar item -h" for flags
-  plugin NAME           run a built-in bar plugin: clock, network, battery
+  plugin NAME           run a built-in bar plugin: clock, network, battery,
+                        volume, brightness, bluetooth, wwan
 `
 
 func main() {

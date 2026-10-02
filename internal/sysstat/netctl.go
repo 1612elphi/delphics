@@ -49,20 +49,32 @@ func (s *Stat) DisconnectWifi(n Network) error {
 	return s.conn.Object(nm, n.wifiDev).Call(nm+".Device.Disconnect", 0).Err
 }
 
+type savedConnection struct {
+	path     dbus.ObjectPath
+	settings map[string]map[string]dbus.Variant
+}
+
+func (s *Stat) savedConnections() []savedConnection {
+	const settings = "/org/freedesktop/NetworkManager/Settings"
+	var paths []dbus.ObjectPath
+	if err := s.conn.Object(nm, settings).Call(nm+".Settings.ListConnections", 0).Store(&paths); err != nil {
+		return nil
+	}
+	var out []savedConnection
+	for _, p := range paths {
+		var cfg map[string]map[string]dbus.Variant
+		if err := s.conn.Object(nm, p).Call(nm+".Settings.Connection.GetSettings", 0).Store(&cfg); err == nil {
+			out = append(out, savedConnection{p, cfg})
+		}
+	}
+	return out
+}
+
 // savedWifi returns the saved connection for ssid, or "".
 func (s *Stat) savedWifi(ssid string) dbus.ObjectPath {
-	const settings = "/org/freedesktop/NetworkManager/Settings"
-	var conns []dbus.ObjectPath
-	if err := s.conn.Object(nm, settings).Call(nm+".Settings.ListConnections", 0).Store(&conns); err != nil {
-		return ""
-	}
-	for _, c := range conns {
-		var cfg map[string]map[string]dbus.Variant
-		if err := s.conn.Object(nm, c).Call(nm+".Settings.Connection.GetSettings", 0).Store(&cfg); err != nil {
-			continue
-		}
-		if raw, ok := cfg["802-11-wireless"]["ssid"].Value().([]byte); ok && string(raw) == ssid {
-			return c
+	for _, c := range s.savedConnections() {
+		if raw, ok := c.settings["802-11-wireless"]["ssid"].Value().([]byte); ok && string(raw) == ssid {
+			return c.path
 		}
 	}
 	return ""
